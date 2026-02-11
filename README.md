@@ -20,13 +20,14 @@ Application full-stack pour visualiser et gérer des graphes Neo4j avec support 
 - ✅ **Statistiques** - Comptage de nœuds, relations, graphes par database
 
 ### Frontend (React + TypeScript + Vite)
-- ✅ **Double moteur de rendu** :
+- ✅ **Triple moteur de rendu** :
   - **react-force-graph-2d** - Physique interactive avec zoom/pan
   - **Sigma.js 3.x + Graphology** - Performance optimale pour grands graphes
+  - **G6 (AntV)** - Rendu ultra-rapide pour graphes massifs (20 000+ nœuds)
 - ✅ **Sélecteur de database** - Basculement instantané entre databases
 - ✅ **Palette de 23 couleurs** - Types de nœuds avec génération dynamique
 - ✅ **Légendes dynamiques** - Affichage des types avec compteurs
-- ✅ **Performance** - Optimisations pour 20 000+ nœuds (500ms de rendu)
+- ✅ **Performance** - Optimisations pour 20 000+ nœuds (450-600ms de rendu avec G6)
 - ✅ **Mesure du temps de rendu** - Monitoring en temps réel
 
 ---
@@ -92,6 +93,7 @@ Frontend disponible sur : **http://localhost:5173**
 - **[frontend-graph-viewer/README.md](frontend-graph-viewer/README.md)** - Documentation frontend
 
 ### Guides Avancés
+- **[frontend-graph-viewer/G6_INTEGRATION.md](frontend-graph-viewer/G6_INTEGRATION.md)** - Intégration et optimisation G6 (AntV)
 - **[frontend-graph-viewer/SIGMA_OPTIMIZATION.md](frontend-graph-viewer/SIGMA_OPTIMIZATION.md)** - Optimisation Sigma.js
 - **[frontend-graph-viewer/VISUALIZATION_GUIDE.md](frontend-graph-viewer/VISUALIZATION_GUIDE.md)** - Comparaison des moteurs de rendu
 - **[backend-nodejs/API_EXAMPLES.md](backend-nodejs/API_EXAMPLES.md)** - Exemples d'utilisation API
@@ -113,7 +115,7 @@ node.js-graphe/
 │
 └── frontend-graph-viewer/    # Frontend React + Vite
     ├── src/
-    │   ├── components/       # Composants React (GraphViewer, SigmaGraphViewer)
+    │   ├── components/       # Composants React (GraphViewer, SigmaGraphViewer, G6GraphViewer)
     │   ├── services/         # API client, transformations
     │   └── types/            # Types TypeScript
     └── package.json
@@ -182,11 +184,27 @@ curl -X POST "http://127.0.0.1:8080/api/graphs?database=development" \
 1. Ouvrir **http://localhost:5173**
 2. Sélectionner une database dans le dropdown
 3. Choisir un graphe dans la liste
-4. Basculer entre **Force Graph** et **Sigma.js** pour comparer
+4. Basculer entre **Force Graph**, **Sigma.js** et **G6 (AntV)** pour comparer
 
 ---
 
 ## 📊 Performances
+
+### Tests sur 20 000 Nœuds
+
+| Moteur de Rendu       | Temps de Rendu | Interactivité | Mémoire    |
+|-----------------------|----------------|---------------|------------|
+| **G6 (AntV)**         | **450-600ms**  | ⭐⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐      |
+| **Sigma.js**          | 500ms          | ⭐⭐⭐⭐        | ⭐⭐⭐⭐       |
+| **Force Graph 2D**    | 2000-3000ms    | ⭐⭐⭐           | ⭐⭐⭐         |
+
+### Optimisations G6 (Recommandé pour grands graphes)
+
+- **Temps de rendu** : **450-600ms** pour 20 000 nœuds
+- **Algorithme** : D3-Force avec optimisations GPU
+- **Node sizing adaptatif** : 8-16px selon la taille du graphe
+- **Labels conditionnels** : Désactivés pour graphes > 5000 nœuds
+- **Interactions adaptatives** : Drag-node désactivé pour graphes > 10 000 nœuds
 
 ### Optimisations Sigma.js
 
@@ -198,13 +216,19 @@ curl -X POST "http://127.0.0.1:8080/api/graphs?database=development" \
 
 ### Comparaison des Moteurs
 
-| Critère                | Force Graph 2D | Sigma.js       |
-|------------------------|----------------|----------------|
-| **Petits graphes (<100)** | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐       |
-| **Grands graphes (>5k)**  | ⭐⭐⭐         | ⭐⭐⭐⭐⭐     |
-| **Interactivité**         | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐       |
-| **Performance**           | ⭐⭐⭐         | ⭐⭐⭐⭐⭐     |
-| **Personnalisation**      | ⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐     |
+| Critère                | Force Graph 2D | Sigma.js       | G6 (AntV)      |
+|------------------------|----------------|----------------|----------------|
+| **Petits graphes (<100)** | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐       | ⭐⭐⭐⭐       |
+| **Grands graphes (>5k)**  | ⭐⭐⭐         | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐⭐     |
+| **Graphes massifs (>20k)**| ⭐⭐           | ⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐     |
+| **Interactivité**         | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐     |
+| **Performance**           | ⭐⭐⭐         | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐⭐     |
+| **Personnalisation**      | ⭐⭐⭐⭐       | ⭐⭐⭐⭐⭐     | ⭐⭐⭐⭐⭐     |
+
+**Recommandations** :
+- **< 1 000 nœuds** : Force Graph 2D (interactivité maximale)
+- **1 000 - 10 000** : Sigma.js ou G6 (bon équilibre)
+- **> 10 000 nœuds** : **G6 (AntV)** (performances optimales)
 
 ---
 
