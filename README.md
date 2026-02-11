@@ -93,6 +93,7 @@ Frontend disponible sur : **http://localhost:5173**
 - **[frontend-graph-viewer/README.md](frontend-graph-viewer/README.md)** - Documentation frontend
 
 ### Guides Avancés
+- **[IMPACT_ANALYSIS_GUIDE.md](IMPACT_ANALYSIS_GUIDE.md)** - 🔍 Analyse d'impact et dépendances
 - **[frontend-graph-viewer/G6_INTEGRATION.md](frontend-graph-viewer/G6_INTEGRATION.md)** - Intégration et optimisation G6 (AntV)
 - **[frontend-graph-viewer/SIGMA_OPTIMIZATION.md](frontend-graph-viewer/SIGMA_OPTIMIZATION.md)** - Optimisation Sigma.js
 - **[frontend-graph-viewer/VISUALIZATION_GUIDE.md](frontend-graph-viewer/VISUALIZATION_GUIDE.md)** - Comparaison des moteurs de rendu
@@ -252,7 +253,50 @@ curl -X POST "http://127.0.0.1:8080/api/graphs?database=development" \
 
 ---
 
-## 🔒 Sécurité
+## � Analyse d'Impact
+
+### Capacités d'Analyse
+
+L'application supporte des **analyses d'impact sophistiquées** pour identifier les dépendances et évaluer les conséquences de modifications :
+
+- **Analyse Downstream** : Identifier tous les nœuds impactés par un changement
+- **Analyse Upstream** : Trouver les dépendances d'un nœud
+- **Détection de Cycles** : Identifier les dépendances circulaires
+- **Nœuds Critiques (SPOF)** : Trouver les points de défaillance uniques
+- **Métriques d'Impact** : Blast radius, profondeur maximale, chemins critiques
+
+### Requêtes Cypher Disponibles
+
+```cypher
+// Analyser l'impact d'un nœud (tous les niveaux)
+MATCH path = (source {id: 'node-id'})-[r:DEPENDS_ON*]->(impacted)
+RETURN DISTINCT impacted, MIN(length(path)) as distance
+
+// Détecter les cycles de dépendances
+MATCH cycle = (n {id: 'node-id'})-[r:DEPENDS_ON*2..10]->(n)
+RETURN cycle, length(cycle) as cycleLength
+
+// Identifier les nœuds critiques
+MATCH (node)<-[r:DEPENDS_ON]-(dependent)
+WITH node, COUNT(dependent) as dependentCount
+WHERE dependentCount > 5
+RETURN node, dependentCount
+ORDER BY dependentCount DESC
+```
+
+### Cas d'Usage
+
+- **Microservices** : Impact de mise à jour de services
+- **Infrastructure** : Simulation de pannes
+- **Code Source** : Analyse de refactoring
+- **Supply Chain** : Gestion des ruptures d'approvisionnement
+- **Bases de Données** : Impact de modifications de schéma
+
+📚 **Guide complet** : [IMPACT_ANALYSIS_GUIDE.md](IMPACT_ANALYSIS_GUIDE.md)
+
+---
+
+## �🔒 Sécurité
 
 - ✅ Protection des databases système (`neo4j`, `system`)
 - ✅ Validation des noms de databases (regex stricte)
