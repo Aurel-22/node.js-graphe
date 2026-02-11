@@ -32,7 +32,7 @@ const NODE_COLORS: Record<string, string> = {
 };
 
 // Générateur de couleur déterministe pour types inconnus
-const generateColorFromString = (str: string): string => {
+export const generateColorFromString = (str: string): string => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
@@ -91,3 +91,6 @@ export function getNodeColor(type: string): string {
 export function getEdgeColor(type: string): string {
   return EDGE_COLORS[type] || EDGE_COLORS.default;
 }
+
+// Alias for compatibility
+export const getColorForType = getNodeColor;

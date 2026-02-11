@@ -1,0 +1,232 @@
+.g6-graph-viewer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #f8f9fa;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.g6-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.g6-controls {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+}
+
+.g6-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: #f0f2f5;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #555;
+  white-space: nowrap;
+}
+
+.stat-badge strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.stat-badge.render-time {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.stat-badge.render-time strong {
+  color: white;
+}
+
+.stat-badge-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  border-radius: 6px;
+  font-size: 13px;
+  color: white;
+  font-weight: 500;
+}
+
+/* Legend */
+.g6-legend {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  max-width: 300px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.legend-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.legend-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+  transform: translateX(3px);
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.legend-label {
+  flex: 1;
+  font-size: 13px;
+  color: #333;
+  font-weight: 500;
+}
+
+.legend-count {
+  font-size: 12px;
+  color: #999;
+  font-weight: 400;
+}
+
+/* Help panel */
+.g6-help {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  max-width: 250px;
+  z-index: 10;
+}
+
+.help-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 10px;
+}
+
+.g6-help ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.g6-help li {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 6px;
+  padding-left: 0;
+}
+
+.g6-help li:last-child {
+  margin-bottom: 0;
+}
+
+.g6-help strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+/* Scrollbar styling */
+.g6-controls::-webkit-scrollbar,
+.g6-legend::-webkit-scrollbar {
+  width: 6px;
+}
+
+.g6-controls::-webkit-scrollbar-track,
+.g6-legend::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+}
+
+.g6-controls::-webkit-scrollbar-thumb,
+.g6-legend::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.g6-controls::-webkit-scrollbar-thumb:hover,
+.g6-legend::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .g6-controls {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+  }
+
+  .g6-help {
+    display: none;
+  }
+
+  .g6-legend {
+    max-width: none;
+  }
+
+  .stat-badge {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+}

@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { GraphList } from './components/GraphList';
 import { GraphViewer } from './components/GraphViewer';
 import SigmaGraphViewer from './components/SigmaGraphViewer';
+import G6GraphViewer from './components/G6GraphViewer';
 import { graphApi, databaseApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
 import './App.css';
 
-type ViewerType = 'force-graph' | 'sigma';
+type ViewerType = 'force-graph' | 'sigma' | 'g6';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -115,13 +116,19 @@ function App() {
               className={viewerType === 'force-graph' ? 'active' : ''}
               onClick={() => setViewerType('force-graph')}
             >
-              🌀 Force Graph (d3.js)
+              🌀 Force Graph
             </button>
             <button
               className={viewerType === 'sigma' ? 'active' : ''}
               onClick={() => setViewerType('sigma')}
             >
               ⚡ Sigma.js
+            </button>
+            <button
+              className={viewerType === 'g6' ? 'active' : ''}
+              onClick={() => setViewerType('g6')}
+            >
+              🚀 G6 (AntV)
             </button>
           </div>
         </div>
@@ -153,7 +160,7 @@ function App() {
             title={selectedGraphTitle}
             loading={graphLoading}
           />
-        ) : (
+        ) : viewerType === 'sigma' ? (
           <div className="graph-viewer-container">
             {graphLoading ? (
               <div className="loading-state">
@@ -162,6 +169,17 @@ function App() {
               </div>
             ) : (
               <SigmaGraphViewer data={rawGraphData} />
+            )}
+          </div>
+        ) : (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe...</p>
+              </div>
+            ) : (
+              <G6GraphViewer graphData={rawGraphData!} />
             )}
           </div>
         )}

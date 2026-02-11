@@ -10,6 +10,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@antv/g6": "^5.0.51",
     "axios": "^1.6.5",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
