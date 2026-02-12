@@ -189,6 +189,124 @@ export class Neo4jService {
     }
   }
 
+  // Obtenir un noeud de départ (le premier noeud d'un graphe)
+  async getStartingNode(graphId: string, database?: string): Promise<GraphNode | null> {
+    const session = this.getSession(database);
+
+    try {
+      const result = await session.run(
+        `
+        MATCH (n:GraphNode {graph_id: $graphId})
+        RETURN n.node_id as id, n.label as label, n.node_type as node_type, n.properties as properties
+        LIMIT 1
+        `,
+        { graphId }
+      );
+
+      if (result.records.length === 0) {
+        return null;
+      }
+
+      const record = result.records[0];
+      return {
+        id: record.get("id"),
+        label: record.get("label"),
+        node_type: record.get("node_type"),
+        properties: JSON.parse(record.get("properties") || "{}"),
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  // Obtenir les voisins d'un noeud (noeuds et arêtes directement connectés)
+  async getNodeNeighbors(graphId: string, nodeId: string, depth: number = 1, database?: string): Promise<GraphData> {
+    const session = this.getSession(database);
+
+    try {
+      // Récupérer les nœuds voisins et les arêtes sur la profondeur spécifiée
+      // Utiliser UNION pour capturer relations sortantes ET entrantes
+      const result = await session.run(
+        `
+        MATCH path = (n:GraphNode {graph_id: $graphId, node_id: $nodeId})-[r:CONNECTED_TO*1..${depth}]->(neighbor:GraphNode {graph_id: $graphId})
+        WITH nodes(path) as pathNodes, relationships(path) as pathRels
+        UNWIND pathNodes as node
+        WITH collect(DISTINCT {
+          id: node.node_id,
+          label: node.label,
+          node_type: node.node_type,
+          properties: node.properties
+        }) as nodesList, pathRels
+        UNWIND pathRels as rel
+        WITH nodesList, collect(DISTINCT {
+          id: id(rel),
+          source: startNode(rel).node_id,
+          target: endNode(rel).node_id,
+          label: rel.label,
+          edge_type: rel.edge_type,
+          properties: rel.properties
+        }) as edgesList
+        RETURN nodesList, edgesList
+        
+        UNION
+        
+        MATCH path = (n:GraphNode {graph_id: $graphId, node_id: $nodeId})<-[r:CONNECTED_TO*1..${depth}]-(neighbor:GraphNode {graph_id: $graphId})
+        WITH nodes(path) as pathNodes, relationships(path) as pathRels
+        UNWIND pathNodes as node
+        WITH collect(DISTINCT {
+          id: node.node_id,
+          label: node.label,
+          node_type: node.node_type,
+          properties: node.properties
+        }) as nodesList, pathRels
+        UNWIND pathRels as rel
+        WITH nodesList, collect(DISTINCT {
+          id: id(rel),
+          source: startNode(rel).node_id,
+          target: endNode(rel).node_id,
+          label: rel.label,
+          edge_type: rel.edge_type,
+          properties: rel.properties
+        }) as edgesList
+        RETURN nodesList, edgesList
+        `,
+        { graphId, nodeId }
+      );
+
+      const allNodes = new Map<string, GraphNode>();
+      const allEdges = new Map<string, GraphEdge>();
+
+      // Combiner les résultats des deux parties du UNION
+      result.records.forEach((record) => {
+        const nodes: GraphNode[] = (record.get("nodesList") || []).map((n: any) => ({
+          id: n.id,
+          label: n.label,
+          node_type: n.node_type,
+          properties: JSON.parse(n.properties || "{}"),
+        }));
+
+        const edges: GraphEdge[] = (record.get("edgesList") || []).map((e: any) => ({
+          id: e.id.toString(),
+          source: e.source,
+          target: e.target,
+          label: e.label || undefined,
+          edge_type: e.edge_type,
+          properties: JSON.parse(e.properties || "{}"),
+        }));
+
+        nodes.forEach(node => allNodes.set(node.id, node));
+        edges.forEach(edge => allEdges.set(edge.id, edge));
+      });
+
+      return { 
+        nodes: Array.from(allNodes.values()), 
+        edges: Array.from(allEdges.values()) 
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
   async listGraphs(database?: string): Promise<GraphSummary[]> {
     const session = this.getSession(database);
 

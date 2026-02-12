@@ -39,6 +39,37 @@ export function graphRoutes(neo4jService: Neo4jService) {
     }
   });
 
+  // Get starting node for a graph
+  router.get("/graphs/:id/starting-node", async (req, res, next) => {
+    try {
+      const database = req.query.database as string | undefined;
+      const node = await neo4jService.getStartingNode(req.params.id, database);
+      if (!node) {
+        return res.status(404).json({ error: "No nodes found in graph" });
+      }
+      res.json(node);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Get neighbors of a node
+  router.get("/graphs/:id/nodes/:nodeId/neighbors", async (req, res, next) => {
+    try {
+      const database = req.query.database as string | undefined;
+      const depth = Math.min(parseInt(req.query.depth as string) || 1, 15); // Limite à 15 niveaux maximum
+      const neighbors = await neo4jService.getNodeNeighbors(
+        req.params.id,
+        req.params.nodeId,
+        depth,
+        database
+      );
+      res.json(neighbors);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Create a new graph from Mermaid code
   router.post("/graphs", async (req, res, next) => {
     try {

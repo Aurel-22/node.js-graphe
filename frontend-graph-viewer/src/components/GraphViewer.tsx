@@ -107,7 +107,7 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
     return (
       <div className="graph-viewer">
         <div className="no-graph">
-          <h2>🎨 Graph Visualizer</h2>
+          <h2>Graph Visualizer</h2>
           <p>Select a graph from the list to visualize it</p>
         </div>
       </div>
@@ -117,13 +117,13 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
   return (
     <div className="graph-viewer">
       <div className="graph-header">
-        <h2>🎨 {title}</h2>
+        <h2>{title}</h2>
         <div className="graph-controls">
           <button onClick={() => graphRef.current?.zoomToFit(400, 50)}>
-            🔍 Fit View
+            Fit View
           </button>
           <button onClick={() => graphRef.current?.centerAt(0, 0, 400)}>
-            🎯 Center
+            Center
           </button>
         </div>
       </div>

@@ -18,7 +18,7 @@ export const GraphList: React.FC<GraphListProps> = ({
   if (loading) {
     return (
       <div className="graph-list">
-        <h2>📊 Available Graphs</h2>
+        <h2>Available Graphs</h2>
         <div className="loading">Loading graphs...</div>
       </div>
     );
@@ -27,7 +27,7 @@ export const GraphList: React.FC<GraphListProps> = ({
   if (graphs.length === 0) {
     return (
       <div className="graph-list">
-        <h2>📊 Available Graphs</h2>
+        <h2>Available Graphs</h2>
         <div className="no-graphs">No graphs found</div>
       </div>
     );
@@ -35,7 +35,7 @@ export const GraphList: React.FC<GraphListProps> = ({
 
   return (
     <div className="graph-list">
-      <h2>📊 Available Graphs</h2>
+      <h2>Available Graphs</h2>
       <div className="graph-items">
         {graphs.map((graph) => (
           <div

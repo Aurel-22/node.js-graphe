@@ -166,7 +166,7 @@ const G6GraphViewer: React.FC<G6GraphViewerProps> = ({ graphData }) => {
             Render: <strong>{renderTime.toFixed(0)}ms</strong>
           </span>
           <span className="stat-badge-info">
-            🚀 G6 (AntV)
+            G6 (AntV)
           </span>
         </div>
 

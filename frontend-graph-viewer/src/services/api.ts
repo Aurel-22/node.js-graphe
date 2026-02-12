@@ -44,6 +44,20 @@ export const graphApi = {
     return response.data;
   },
 
+  // Obtenir un noeud de départ pour un graphe
+  getStartingNode: async (id: string, database?: string): Promise<GraphData['nodes'][0]> => {
+    const params = database ? { database } : {};
+    const response = await api.get(`/graphs/${id}/starting-node`, { params });
+    return response.data;
+  },
+
+  // Obtenir les voisins d'un noeud
+  getNodeNeighbors: async (graphId: string, nodeId: string, depth: number = 1, database?: string): Promise<GraphData> => {
+    const params = database ? { database, depth: depth.toString() } : { depth: depth.toString() };
+    const response = await api.get<GraphData>(`/graphs/${graphId}/nodes/${nodeId}/neighbors`, { params });
+    return response.data;
+  },
+
   // Health check
   healthCheck: async (): Promise<{ status: string; timestamp: string }> => {
     const response = await api.get('/health');

@@ -2,7 +2,8 @@
   width: 100%;
   max-width: 400px;
   padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+  border-right: 1px solid rgba(102, 126, 234, 0.2);
   color: white;
   overflow-y: auto;
 }
@@ -20,8 +21,8 @@
 }
 
 .graph-item {
-  background: rgba(255, 255, 255, 0.1);
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(102, 126, 234, 0.08);
+  border: 1px solid rgba(102, 126, 234, 0.2);
   border-radius: 12px;
   padding: 15px;
   cursor: pointer;
@@ -29,15 +30,15 @@
 }
 
 .graph-item:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(102, 126, 234, 0.12);
+  border-color: rgba(102, 126, 234, 0.4);
   transform: translateX(5px);
 }
 
 .graph-item.selected {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: white;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  background: rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
 }
 
 .graph-item h3 {

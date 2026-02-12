@@ -3,12 +3,13 @@ import { GraphList } from './components/GraphList';
 import { GraphViewer } from './components/GraphViewer';
 import SigmaGraphViewer from './components/SigmaGraphViewer';
 import G6GraphViewer from './components/G6GraphViewer';
+import ImpactAnalysis from './components/ImpactAnalysis';
 import { graphApi, databaseApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
 import './App.css';
 
-type ViewerType = 'force-graph' | 'sigma' | 'g6';
+type ViewerType = 'force-graph' | 'sigma' | 'g6' | 'impact';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -95,10 +96,10 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🌐 Neo4j Graph Visualizer</h1>
+        <h1>version demo</h1>
         <div className="header-center">
           <div className="database-selector">
-            <label htmlFor="database-select">📊 Database:</label>
+            <label htmlFor="database-select">Database:</label>
             <select
               id="database-select"
               value={selectedDatabase}
@@ -116,25 +117,31 @@ function App() {
               className={viewerType === 'force-graph' ? 'active' : ''}
               onClick={() => setViewerType('force-graph')}
             >
-              🌀 Force Graph
+              Force Graph
             </button>
             <button
               className={viewerType === 'sigma' ? 'active' : ''}
               onClick={() => setViewerType('sigma')}
             >
-              ⚡ Sigma.js
+              Sigma.js
             </button>
             <button
               className={viewerType === 'g6' ? 'active' : ''}
               onClick={() => setViewerType('g6')}
             >
-              🚀 G6 (AntV)
+              G6 (AntV)
+            </button>
+            <button
+              className={viewerType === 'impact' ? 'active' : ''}
+              onClick={() => setViewerType('impact')}
+            >
+              Analyse d'impact
             </button>
           </div>
         </div>
         <div className="header-info">
           <span className="status">
-            {error ? '🔴 Disconnected' : '🟢 Connected'}
+            {error ? ' Disconnected' : ' Connected'}
           </span>
           <span className="backend-url">Backend: http://127.0.0.1:8080</span>
         </div>
@@ -142,7 +149,7 @@ function App() {
 
       {error && (
         <div className="error-banner">
-          <span>⚠️ {error}</span>
+          <span> {error}</span>
           <button onClick={loadGraphs}>Retry</button>
         </div>
       )}
@@ -168,7 +175,18 @@ function App() {
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <SigmaGraphViewer data={rawGraphData} />
+              <SigmaGraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+          </div>
+        ) : viewerType === 'impact' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe...</p>
+              </div>
+            ) : (
+              <ImpactAnalysis data={rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
         ) : (

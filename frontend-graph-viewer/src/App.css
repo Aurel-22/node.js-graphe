@@ -17,17 +17,18 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #0f0f1e;
+  background: #0a0a0f;
 }
 
 .app-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   color: white;
   padding: 20px 30px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border-bottom: 1px solid rgba(102, 126, 234, 0.3);
   z-index: 100;
   gap: 20px;
 }
@@ -86,7 +87,7 @@ body {
 }
 
 .database-selector select option {
-  background: #16213e;
+  background: #0f1419;
   color: white;
 }
 
