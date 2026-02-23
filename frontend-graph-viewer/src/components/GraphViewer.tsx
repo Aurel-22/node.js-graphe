@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { ForceGraphData, ForceGraphNode, ForceGraphLink } from '../types/graph';
+import FpsCounter from './FpsCounter';
 import './GraphViewer.css';
 
 interface GraphViewerProps {
@@ -16,7 +17,12 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
   const [highlightLinks, setHighlightLinks] = useState<Set<ForceGraphLink>>(new Set());
   const [hoverNode, setHoverNode] = useState<ForceGraphNode | null>(null);
   const [renderTime, setRenderTime] = useState<number | null>(null);
+  const [timingDetails, setTimingDetails] = useState<{
+    dataPrep: number; simulation: number;
+  } | null>(null);
+  const [timingOpen, setTimingOpen] = useState(false);
   const startTimeRef = useRef<number>(0);
+  const dataPrepTimeRef = useRef<number>(0);
   const [nodeTypes, setNodeTypes] = useState<Array<{ type: string; color: string; count: number }>>([]);
 
   // Mettre à jour les dimensions
@@ -42,6 +48,7 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
       // Démarrer le chronomètre
       startTimeRef.current = performance.now();
       setRenderTime(null);
+      setTimingDetails(null);
       
       // Calculer les types de nœuds pour la légende
       const typeMap = new Map<string, { color: string; count: number }>();
@@ -59,6 +66,8 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
         .sort((a, b) => b.count - a.count);
       setNodeTypes(typesArray);
       
+      dataPrepTimeRef.current = performance.now() - startTimeRef.current;
+
       setTimeout(() => {
         graphRef.current.zoomToFit(400, 50);
       }, 100);
@@ -142,10 +151,10 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
             }
             return node.color;
           }}
-          nodeRelSize={6}
+          nodeRelSize={data && data.nodes.length > 10000 ? 3 : data && data.nodes.length > 1000 ? 2 : 6}
           nodeVal={(node: any) => {
-            if (hoverNode === node) return 15;
-            if (highlightNodes.has(node.id)) return 12;
+            if (hoverNode === node) return data && data.nodes.length > 10000 ? 8 : 15;
+            if (highlightNodes.has(node.id)) return data && data.nodes.length > 10000 ? 6 : 12;
             return node.val;
           }}
           linkColor={(link: any) => {
@@ -168,6 +177,10 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
             if (startTimeRef.current > 0) {
               const elapsed = performance.now() - startTimeRef.current;
               setRenderTime(elapsed);
+              setTimingDetails({
+                dataPrep: dataPrepTimeRef.current,
+                simulation: elapsed - dataPrepTimeRef.current,
+              });
               startTimeRef.current = 0;
             }
           }}
@@ -187,18 +200,22 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
         </div>
       )}
 
-      <div className="graph-legend">
-        <h3>Legend ({nodeTypes.length} types)</h3>
-        <div className="legend-items-scroll">
-          {nodeTypes.map(({ type, color, count }) => (
-            <div key={type} className="legend-item">
-              <div className="legend-color" style={{ background: color }}></div>
-              <span className="legend-label">{type}</span>
-              <span className="legend-count">({count})</span>
+      {timingDetails && (
+        <div className="render-time-details">
+          <button className="timing-toggle" onClick={() => setTimingOpen(!timingOpen)}>
+            ⏱️ Timing details {timingOpen ? '▼' : '▶'}
+          </button>
+          {timingOpen && (
+            <div className="timing-breakdown">
+              <span className="timing-badge data">Data prep: <strong>{timingDetails.dataPrep.toFixed(1)}ms</strong></span>
+              <span className="timing-badge sim">Simulation: <strong>{timingDetails.simulation.toFixed(1)}ms</strong></span>
             </div>
-          ))}
+          )}
         </div>
-      </div>
+      )}
+
+      <FpsCounter recording={renderTime === null && !!data} />
+
     </div>
   );
 };

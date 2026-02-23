@@ -171,6 +171,35 @@
   margin-right: 6px;
 }
 
+.render-time-badge {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #9bb0ff;
+  text-align: center;
+}
+
+.impact-stats-bar {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 20, 25, 0.9);
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  z-index: 10;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

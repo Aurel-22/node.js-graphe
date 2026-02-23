@@ -21,8 +21,24 @@ export function graphRoutes(neo4jService: Neo4jService) {
   router.get("/graphs/:id", async (req, res, next) => {
     try {
       const database = req.query.database as string | undefined;
-      const graphData = await neo4jService.getGraph(req.params.id, database);
-      res.json(graphData);
+      const bypassCache = req.query.nocache === "true";
+      const t0 = Date.now();
+
+      // Vérifier le cache avant la requête pour savoir si c'est un HIT
+      const cacheKey = `graph:${database || "neo4j"}:${req.params.id}`;
+      const isHit = !bypassCache && (neo4jService as any).graphCache?.has(cacheKey);
+
+      const graphData = await neo4jService.getGraph(req.params.id, database, bypassCache);
+
+      const elapsed = Date.now() - t0;
+      const jsonStr = JSON.stringify(graphData);
+      const rawBytes = Buffer.byteLength(jsonStr, 'utf8');
+      res.setHeader("X-Cache", bypassCache ? "BYPASS" : isHit ? "HIT" : "MISS");
+      res.setHeader("X-Response-Time", `${elapsed}ms`);
+      res.setHeader("X-Parallel-Queries", "true");
+      res.setHeader("X-Content-Length-Raw", rawBytes.toString());
+      res.setHeader("Content-Type", "application/json");
+      res.send(jsonStr);
     } catch (error) {
       next(error);
     }
@@ -109,15 +125,43 @@ export function graphRoutes(neo4jService: Neo4jService) {
     }
   });
 
-  // Delete a graph
+  // Delete a graph (+ invalider le cache)
   router.delete("/graphs/:id", async (req, res, next) => {
     try {
       const database = req.query.database as string | undefined;
       await neo4jService.deleteGraph(req.params.id, database);
+      neo4jService.clearCache(req.params.id, database);
       res.status(204).send();
     } catch (error) {
       next(error);
     }
+  });
+
+  // --- Cache management ---
+
+  // GET /optim/cache/stats
+  router.get("/optim/cache/stats", (_req, res) => {
+    res.json(neo4jService.getCacheStats());
+  });
+
+  // DELETE /optim/cache
+  router.delete("/optim/cache", (_req, res) => {
+    const result = neo4jService.clearCache();
+    res.json({ message: "Cache cleared", ...result });
+  });
+
+  // GET /optim/status  — indique quelles optimisations sont actives
+  router.get("/optim/status", (_req, res) => {
+    res.json({
+      gzip: true,          // toujours actif (middleware global)
+      parallelQueries: true, // toujours actif dans getGraph
+      inMemoryCache: true, // toujours actif sauf ?nocache=true
+      cacheTtlSeconds: 300,
+      bypassFlags: {
+        cache: "?nocache=true",
+        gzip: "Accept-Encoding: identity header",
+      },
+    });
   });
 
   return router;

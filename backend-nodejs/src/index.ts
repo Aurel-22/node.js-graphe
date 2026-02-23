@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import { config } from "dotenv";
 import pino from "pino";
 import pinoHttp from "pino-http";
@@ -13,7 +14,17 @@ const logger = pino({ level: process.env.LOG_LEVEL || "info" });
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  exposedHeaders: ['X-Cache', 'X-Response-Time', 'X-Parallel-Queries', 'X-Content-Length-Raw', 'Content-Length'],
+}));
+// Gzip compression — skipped if client sends ?nocompress=true (for benchmarking)
+app.use(compression({
+  filter: (req, res) => {
+    if (req.query.nocompress === 'true') return false;
+    return compression.filter(req, res);
+  },
+  level: 6,
+}));
 app.use(express.json({ limit: "50mb" }));
 app.use(pinoHttp({ logger }));
 
@@ -26,20 +37,23 @@ const neo4jService = new Neo4jService(
 
 await neo4jService.initialize();
 
-// Créer les graphes de test
-try {
-  await neo4jService.createExampleGraph();
-  logger.info("Example graph created");
-} catch (err: any) {
-  logger.error("Failed to create example graph", err);
-}
+// Graphes de test commentés pour accélérer le démarrage
+// Décommenter si besoin de graphes d'exemple
+// try {
+//   await neo4jService.createExampleGraph();
+//   logger.info("Example graph created");
+// } catch (err: any) {
+//   logger.error("Failed to create example graph", err);
+// }
 
-try {
-  await neo4jService.createXLargeTestGraph();
-  logger.info("XLarge test graph created");
-} catch (err: any) {
-  logger.error("Failed to create xlarge graph", err);
-}
+// try {
+//   await neo4jService.createXLargeTestGraph();
+//   logger.info("XLarge test graph created");
+// } catch (err: any) {
+//   logger.error("Failed to create xlarge graph", err);
+// }
+
+logger.info("Skipping example graphs creation for faster startup");
 
 // Routes
 app.use("/api", graphRoutes(neo4jService));

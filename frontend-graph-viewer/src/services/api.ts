@@ -22,6 +22,24 @@ export interface DatabaseStats {
   graphCount: number;
 }
 
+export interface GraphLoadResult {
+  data: GraphData;
+  timeMs: number;
+  cacheStatus: 'HIT' | 'MISS' | 'BYPASS' | 'unknown';
+  responseTimeHeader: string | null;
+  contentLength: number | null;    // taille compressée (gzip) en octets
+  rawContentLength: number | null; // taille brute (avant gzip) en octets
+  parallelQueries: boolean;
+}
+
+export interface CacheStats {
+  hits: number;
+  misses: number;
+  bypasses: number;
+  cachedGraphs: number;
+  keys: string[];
+}
+
 export const graphApi = {
   // Lister tous les graphes
   listGraphs: async (database?: string): Promise<GraphSummary[]> => {
@@ -30,11 +48,38 @@ export const graphApi = {
     return response.data;
   },
 
-  // Obtenir un graphe spécifique
-  getGraph: async (id: string, database?: string): Promise<GraphData> => {
-    const params = database ? { database } : {};
+  // Obtenir un graphe (avec mesures de performance)
+  getGraph: async (
+    id: string,
+    database?: string,
+    options?: { nocache?: boolean; nocompress?: boolean }
+  ): Promise<GraphLoadResult> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (options?.nocache) params.nocache = 'true';
+    if (options?.nocompress) params.nocompress = 'true';
+
+    const t0 = performance.now();
     const response = await api.get<GraphData>(`/graphs/${id}`, { params });
-    return response.data;
+    const timeMs = Math.round(performance.now() - t0);
+
+    const cacheHeader = response.headers['x-cache'] || response.headers['X-Cache'];
+    const responseTimeHeader = response.headers['x-response-time'] || response.headers['X-Response-Time'] || null;
+    const contentLengthStr = response.headers['content-length'];
+    const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : null;
+    const rawLengthStr = response.headers['x-content-length-raw'] || response.headers['X-Content-Length-Raw'];
+    const rawContentLength = rawLengthStr ? parseInt(rawLengthStr, 10) : null;
+    const parallelQueries = (response.headers['x-parallel-queries'] || response.headers['X-Parallel-Queries']) === 'true';
+
+    return {
+      data: response.data,
+      timeMs,
+      cacheStatus: (cacheHeader as GraphLoadResult['cacheStatus']) ?? 'unknown',
+      responseTimeHeader,
+      contentLength,
+      rawContentLength,
+      parallelQueries,
+    };
   },
 
   // Obtenir les statistiques d'un graphe
@@ -87,6 +132,26 @@ export const databaseApi = {
   // Obtenir les statistiques d'une database
   getDatabaseStats: async (name: string): Promise<DatabaseStats> => {
     const response = await api.get<DatabaseStats>(`/databases/${name}/stats`);
+    return response.data;
+  },
+};
+
+export const optimApi = {
+  // Stats du cache backend
+  getCacheStats: async (): Promise<CacheStats> => {
+    const response = await api.get<CacheStats>('/optim/cache/stats');
+    return response.data;
+  },
+
+  // Vider le cache
+  clearCache: async (): Promise<{ message: string; cleared: string[] }> => {
+    const response = await api.delete('/optim/cache');
+    return response.data;
+  },
+
+  // Statut des optimisations
+  getStatus: async () => {
+    const response = await api.get('/optim/status');
     return response.data;
   },
 };

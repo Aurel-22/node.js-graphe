@@ -157,6 +157,59 @@
   color: #FFD700;
 }
 
+/* ─── Timing Details ─── */
+.render-time-details {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  background: rgba(40, 40, 70, 0.9);
+  border-radius: 8px;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.render-time-details .timing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #ccc;
+  font-weight: 600;
+  text-align: left;
+}
+.render-time-details .timing-toggle:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.render-time-details .timing-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px 10px;
+}
+
+.render-time-details .timing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff;
+  white-space: nowrap;
+}
+.render-time-details .timing-badge strong { font-weight: 700; }
+.render-time-details .timing-badge.data { background: #2196F3; }
+.render-time-details .timing-badge.sim { background: #4CAF50; }
+
 @keyframes fadeIn {
   from {
     opacity: 0;

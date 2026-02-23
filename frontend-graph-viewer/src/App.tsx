@@ -3,13 +3,18 @@ import { GraphList } from './components/GraphList';
 import { GraphViewer } from './components/GraphViewer';
 import SigmaGraphViewer from './components/SigmaGraphViewer';
 import G6GraphViewer from './components/G6GraphViewer';
+import D3GraphViewer from './components/D3GraphViewer';
+import CytoscapeGraphViewer from './components/CytoscapeGraphViewer';
+import VisNetworkViewer from './components/VisNetworkViewer';
+import ForceGraph3DViewer from './components/ForceGraph3DViewer';
 import ImpactAnalysis from './components/ImpactAnalysis';
+import { OptimPanel } from './components/OptimPanel';
 import { graphApi, databaseApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
 import './App.css';
 
-type ViewerType = 'force-graph' | 'sigma' | 'g6' | 'impact';
+type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -79,9 +84,11 @@ function App() {
       const selectedGraph = graphs.find(g => g.id === id);
       setSelectedGraphTitle(selectedGraph?.title || '');
       
-      const data = await graphApi.getGraph(id, selectedDatabase);
-      setRawGraphData(data); // Stocker les données brutes pour sigma.js
-      const transformedData = transformGraphData(data.nodes, data.edges);
+      const result = await graphApi.getGraph(id, selectedDatabase);
+      // Envoyer le résultat au panneau d'optimisations
+      (window as any).__optimSetLastLoad?.(result);
+      setRawGraphData(result.data);
+      const transformedData = transformGraphData(result.data.nodes, result.data.edges);
       setGraphData(transformedData);
     } catch (err) {
       console.error('Failed to load graph:', err);
@@ -120,6 +127,12 @@ function App() {
               Force Graph
             </button>
             <button
+              className={viewerType === '3d' ? 'active' : ''}
+              onClick={() => setViewerType('3d')}
+            >
+              3D Graph
+            </button>
+            <button
               className={viewerType === 'sigma' ? 'active' : ''}
               onClick={() => setViewerType('sigma')}
             >
@@ -130,6 +143,24 @@ function App() {
               onClick={() => setViewerType('g6')}
             >
               G6 (AntV)
+            </button>
+            <button
+              className={viewerType === 'd3' ? 'active' : ''}
+              onClick={() => setViewerType('d3')}
+            >
+              D3.js
+            </button>
+            <button
+              className={viewerType === 'cytoscape' ? 'active' : ''}
+              onClick={() => setViewerType('cytoscape')}
+            >
+              Cytoscape
+            </button>
+            <button
+              className={viewerType === 'vis-network' ? 'active' : ''}
+              onClick={() => setViewerType('vis-network')}
+            >
+              vis-network
             </button>
             <button
               className={viewerType === 'impact' ? 'active' : ''}
@@ -167,6 +198,17 @@ function App() {
             title={selectedGraphTitle}
             loading={graphLoading}
           />
+        ) : viewerType === '3d' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe 3D...</p>
+              </div>
+            ) : (
+              <ForceGraph3DViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+          </div>
         ) : viewerType === 'sigma' ? (
           <div className="graph-viewer-container">
             {graphLoading ? (
@@ -176,6 +218,39 @@ function App() {
               </div>
             ) : (
               <SigmaGraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+          </div>
+        ) : viewerType === 'd3' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe...</p>
+              </div>
+            ) : (
+              <D3GraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+          </div>
+        ) : viewerType === 'cytoscape' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe...</p>
+              </div>
+            ) : (
+              <CytoscapeGraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+          </div>
+        ) : viewerType === 'vis-network' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe...</p>
+              </div>
+            ) : (
+              <VisNetworkViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
         ) : viewerType === 'impact' ? (
@@ -202,6 +277,12 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Panneau flottant des optimisations */}
+      <OptimPanel
+        currentGraphId={selectedGraphId ?? undefined}
+        currentDatabase={selectedDatabase}
+      />
     </div>
   );
 }

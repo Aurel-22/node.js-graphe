@@ -1,0 +1,482 @@
+.d3-graph-viewer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #f8f9fa;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.d3-container {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 8px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.d3-container svg {
+  width: 100%;
+  height: 100%;
+}
+
+.d3-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.15) transparent;
+}
+
+.d3-controls::-webkit-scrollbar {
+  width: 5px;
+}
+.d3-controls::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
+  border-radius: 3px;
+}
+
+.d3-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.d3-stats .stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: #f0f2f5;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
+}
+
+.d3-stats .stat-badge strong {
+  color: #1a1a2e;
+  font-weight: 700;
+}
+
+.d3-stats .stat-badge.render-time {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.d3-stats .stat-badge.render-time strong {
+  color: #1b5e20;
+}
+
+.d3-stats .stat-badge-info {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  background: linear-gradient(135deg, #ff7043, #ff5722);
+  color: white;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Parameter Panel ─── */
+
+/* ─── Timing Details ─── */
+.timing-details-bar {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.timing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #555;
+  font-weight: 600;
+  text-align: left;
+}
+.timing-toggle:hover {
+  background: #f0f2f5;
+}
+
+.timing-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px 10px;
+}
+
+.timing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff;
+  white-space: nowrap;
+}
+.timing-badge strong {
+  font-weight: 700;
+}
+.timing-badge.data {
+  background: #2196F3;
+}
+.timing-badge.svg {
+  background: #9C27B0;
+}
+.timing-badge.dom {
+  background: #FF9800;
+}
+.timing-badge.sim {
+  background: #4CAF50;
+}
+.timing-badge.layout {
+  background: #E91E63;
+}
+.timing-badge.render {
+  background: #FF5722;
+}
+.timing-badge.init {
+  background: #607D8B;
+}
+.timing-badge.events {
+  background: #795548;
+}
+.timing-badge.positions {
+  background: #00BCD4;
+}
+.timing-badge.graph {
+  background: #673AB7;
+}
+
+/* ─── Parameter Panel ─── */
+.d3-params-panel {
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  min-width: 260px;
+  max-width: 280px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.params-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  transition: background 0.15s;
+}
+
+.params-header:hover {
+  background: linear-gradient(135deg, #e9ecef, #dee2e6);
+}
+
+.params-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #333;
+}
+
+.params-toggle {
+  font-size: 10px;
+  color: #888;
+}
+
+.params-body {
+  padding: 8px 12px 12px;
+}
+
+.params-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.param-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.param-btn.reset {
+  background: #f0f2f5;
+  color: #555;
+}
+.param-btn.reset:hover {
+  background: #e3e5e8;
+}
+
+.param-btn.reheat {
+  background: linear-gradient(135deg, #ff7043, #ff5722);
+  color: white;
+}
+.param-btn.reheat:hover {
+  background: linear-gradient(135deg, #ff5722, #e64a19);
+}
+
+.params-section {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.params-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #999;
+  margin-bottom: 6px;
+}
+
+.param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.param-row.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.param-row.checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #ff5722;
+  cursor: pointer;
+}
+
+.param-row.checkbox span {
+  font-size: 12px;
+  color: #555;
+}
+
+.param-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #555;
+}
+
+.param-value {
+  font-weight: 700;
+  color: #ff5722;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+}
+
+.param-row input[type="range"] {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #e0e0e0;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.param-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ff5722;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s;
+}
+
+.param-row input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.param-row input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ff5722;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ─── Legend ─── */
+.d3-legend {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(10px);
+  max-width: 280px;
+}
+
+.d3-legend .legend-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.d3-legend .legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.d3-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #555;
+}
+
+.d3-legend .legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.d3-legend .legend-label {
+  font-weight: 500;
+}
+
+.d3-legend .legend-count {
+  color: #999;
+  font-size: 10px;
+}
+
+/* ─── Tooltip ─── */
+.d3-tooltip {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 10px;
+  padding: 14px 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  min-width: 180px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.d3-tooltip .tooltip-label {
+  font-weight: 700;
+  font-size: 15px;
+  color: #1a1a2e;
+  margin-bottom: 6px;
+}
+
+.d3-tooltip .tooltip-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 4px;
+}
+
+.d3-tooltip .tooltip-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.d3-tooltip .tooltip-id {
+  font-size: 11px;
+  color: #999;
+  font-family: monospace;
+}
+
+/* ─── Help panel ─── */
+.d3-help {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  font-size: 11px;
+  backdrop-filter: blur(10px);
+}
+
+.d3-help .help-title {
+  font-weight: 700;
+  font-size: 12px;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.d3-help ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.d3-help li {
+  padding: 2px 0;
+  color: #555;
+}
+
+.d3-help li strong {
+  color: #333;
+}

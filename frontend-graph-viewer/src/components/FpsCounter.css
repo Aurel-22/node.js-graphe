@@ -1,0 +1,108 @@
+/* ─── FPS Counter ─── */
+.fps-counter {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  z-index: 20;
+  background: rgba(15, 15, 25, 0.92);
+  border-radius: 10px;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  user-select: none;
+  min-width: 80px;
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.fps-counter.expanded {
+  min-width: 220px;
+}
+
+.fps-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.fps-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.fps-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #F44336;
+  animation: fps-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes fps-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.fps-value {
+  font-size: 20px;
+  font-weight: 800;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  transition: color 0.3s;
+}
+
+.fps-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.fps-expand {
+  margin-left: auto;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ─── Body (expanded) ─── */
+.fps-body {
+  padding: 0 10px 10px;
+  animation: fps-fade-in 0.2s ease;
+}
+
+@keyframes fps-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fps-sparkline {
+  width: 200px;
+  height: 60px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: block;
+}
+
+.fps-stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fps-stat {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+}
+
+.fps-stat strong {
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}

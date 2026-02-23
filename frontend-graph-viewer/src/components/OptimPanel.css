@@ -1,0 +1,245 @@
+/* ===== FAB bouton flottant ===== */
+.optim-fab {
+  position: fixed;
+  bottom: 80px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.optim-fab:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 14px rgba(245,158,11,0.5);
+}
+
+/* ===== Panneau principal ===== */
+.optim-panel {
+  position: fixed;
+  bottom: 132px;
+  right: 16px;
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: #1e1e2e;
+  border: 1px solid #374151;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  z-index: 999;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+/* ===== En-tête ===== */
+.optim-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #161625;
+  border-bottom: 1px solid #374151;
+  border-radius: 12px 12px 0 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+.optim-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+}
+.optim-close:hover { color: #e2e8f0; }
+
+/* ===== Badges ===== */
+.optim-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid #2d3748;
+}
+.badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-on {
+  background: rgba(16,185,129,0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16,185,129,0.3);
+}
+
+/* ===== Sections ===== */
+.optim-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid #2d3748;
+}
+.optim-section:last-child { border-bottom: none; }
+
+.optim-section-title {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ===== Grille clé-valeur ===== */
+.optim-kv-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+.optim-kv-grid span:nth-child(odd) { color: #94a3b8; }
+.optim-kv-grid span:nth-child(even) { text-align: right; font-weight: 500; }
+
+.optim-muted { color: #64748b; font-size: 12px; margin-bottom: 8px; }
+.optim-muted.warn { color: #f59e0b; }
+.optim-muted code { background: #2d3748; padding: 1px 4px; border-radius: 3px; }
+
+/* ===== Cache badges ===== */
+.cache-badge {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.cache-badge.hit    { background: rgba(16,185,129,0.2); color: #6ee7b7; }
+.cache-badge.miss   { background: rgba(239,68,68,0.2);  color: #fca5a5; }
+.cache-badge.bypass { background: rgba(148,163,184,0.2); color: #94a3b8; }
+
+/* ===== Gain inline ===== */
+.gain-inline { color: #6ee7b7; font-weight: 600; }
+
+/* ===== Hit rate ===== */
+.hitrate.good    { color: #6ee7b7; }
+.hitrate.neutral { color: #94a3b8; }
+
+/* ===== Boutons ===== */
+.optim-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: opacity 0.15s;
+  margin-top: 4px;
+}
+.optim-btn:disabled { opacity: 0.4; cursor: default; }
+.optim-btn-primary {
+  background: #3b82f6;
+  color: #fff;
+  width: 100%;
+  padding: 8px;
+}
+.optim-btn-primary:hover:not(:disabled) { background: #2563eb; }
+.optim-btn-danger {
+  background: rgba(239,68,68,0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239,68,68,0.3);
+}
+.optim-btn-danger:hover { background: rgba(239,68,68,0.25); }
+.optim-btn-sm {
+  background: #2d3748;
+  border: none;
+  color: #94a3b8;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.optim-btn-sm:hover { background: #374151; color: #e2e8f0; }
+
+/* ===== Clear message ===== */
+.optim-clear-msg {
+  font-size: 12px;
+  color: #6ee7b7;
+  margin-top: 6px;
+}
+
+/* ===== Erreur ===== */
+.optim-error {
+  color: #fca5a5;
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(239,68,68,0.1);
+  border-radius: 4px;
+}
+
+/* ===== Résultats benchmark ===== */
+.bench-result { margin-top: 10px; }
+.bench-run-at { font-size: 11px; color: #64748b; margin-bottom: 6px; }
+
+.bench-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.bench-table th {
+  text-align: left;
+  color: #64748b;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #374151;
+}
+.bench-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #1e293b;
+}
+.row-optimized td { color: #e2e8f0; }
+.row-raw td { color: #94a3b8; }
+
+/* ===== Gain chips ===== */
+.bench-gains {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.gain-chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+.gain-chip.positive {
+  background: rgba(16,185,129,0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.gain-chip.negative {
+  background: rgba(239,68,68,0.1);
+  color: #fca5a5;
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+/* ===== Footer ===== */
+.optim-footer { padding-top: 8px; padding-bottom: 10px; }
+.optim-footer .optim-muted code {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* ===== Scrollbar ===== */
+.optim-panel::-webkit-scrollbar { width: 4px; }
+.optim-panel::-webkit-scrollbar-track { background: transparent; }
+.optim-panel::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }

@@ -27,6 +27,18 @@ const NODE_COLORS: Record<string, string> = {
   merge: '#651FFF',      // Violet profond
   split: '#00B0FF',      // Bleu clair
   
+  // Infrastructure & DevOps
+  gateway: '#26A69A',    // Teal
+  cache: '#FF7043',      // Orange profond
+  scheduler: '#AB47BC',  // Violet clair
+  monitor: '#42A5F5',    // Bleu clair
+  storage: '#8D6E63',    // Marron clair
+  proxy: '#78909C',      // Bleu gris
+  worker: '#EF5350',     // Rouge clair
+  broker: '#66BB6A',     // Vert moyen
+  registry: '#5C6BC0',   // Indigo
+  controller: '#FFCA28', // Jaune doré
+  
   // Défaut
   default: '#9E9E9E',
 };

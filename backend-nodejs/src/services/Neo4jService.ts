@@ -1,4 +1,5 @@
 import neo4j, { Driver, Session, Integer } from "neo4j-driver";
+import NodeCache from "node-cache";
 import {
   GraphNode,
   GraphEdge,
@@ -11,6 +12,11 @@ import {
 export class Neo4jService {
   private driver: Driver;
   private defaultDatabase: string = 'neo4j';
+  // In-memory cache (TTL 5 minutes par défaut)
+  private graphCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+
+  // Statistiques de cache pour le monitoring
+  private cacheStats = { hits: 0, misses: 0, bypasses: 0 };
 
   constructor(uri: string, user: string, password: string) {
     this.driver = neo4j.driver(uri, neo4j.auth.basic(user, password));
@@ -21,6 +27,32 @@ export class Neo4jService {
     return this.driver.session({ 
       database: database || this.defaultDatabase 
     });
+  }
+
+  // Accès aux stats et contrôle du cache
+  getCacheStats() {
+    const keys = this.graphCache.keys();
+    const nodeCache = this.graphCache.getStats();
+    return {
+      hits: this.cacheStats.hits,
+      misses: this.cacheStats.misses,
+      bypasses: this.cacheStats.bypasses,
+      cachedGraphs: keys.length,
+      keys,
+      nodeCache,
+    };
+  }
+
+  clearCache(graphId?: string, database?: string) {
+    if (graphId) {
+      const key = `graph:${database || this.defaultDatabase}:${graphId}`;
+      this.graphCache.del(key);
+      return { cleared: [key] };
+    }
+    const keys = this.graphCache.keys();
+    this.graphCache.flushAll();
+    this.cacheStats = { hits: 0, misses: 0, bypasses: 0 };
+    return { cleared: keys };
   }
 
   async initialize(): Promise<void> {
@@ -144,18 +176,40 @@ export class Neo4jService {
     }
   }
 
-  async getGraph(graphId: string, database?: string): Promise<GraphData> {
-    const session = this.getSession(database);
+  async getGraph(graphId: string, database?: string, bypassCache = false): Promise<GraphData> {
+    const cacheKey = `graph:${database || this.defaultDatabase}:${graphId}`;
+
+    // Cache lookup (sauf si bypass demandé)
+    if (!bypassCache) {
+      const cached = this.graphCache.get<GraphData>(cacheKey);
+      if (cached) {
+        this.cacheStats.hits++;
+        return cached;
+      }
+      this.cacheStats.misses++;
+    } else {
+      this.cacheStats.bypasses++;
+    }
+
+    // Deux sessions pour requêtes parallèles
+    const sessionNodes = this.getSession(database);
+    const sessionEdges = this.getSession(database);
 
     try {
-      // Récupérer les nœuds
-      const nodesResult = await session.run(
-        `
-        MATCH (n:GraphNode {graph_id: $graphId})
-        RETURN n.node_id as id, n.label as label, n.node_type as node_type, n.properties as properties
-        `,
-        { graphId }
-      );
+      // Requêtes en parallèle (au lieu de séquentiel)
+      const [nodesResult, edgesResult] = await Promise.all([
+        sessionNodes.run(
+          `MATCH (n:GraphNode {graph_id: $graphId})
+           RETURN n.node_id as id, n.label as label, n.node_type as node_type, n.properties as properties`,
+          { graphId }
+        ),
+        sessionEdges.run(
+          `MATCH (source:GraphNode {graph_id: $graphId})-[r:CONNECTED_TO]->(target:GraphNode {graph_id: $graphId})
+           RETURN id(r) as id, source.node_id as source, target.node_id as target,
+                  r.label as label, r.edge_type as edge_type, r.properties as properties`,
+          { graphId }
+        ),
+      ]);
 
       const nodes: GraphNode[] = nodesResult.records.map((record) => ({
         id: record.get("id"),
@@ -163,16 +217,6 @@ export class Neo4jService {
         node_type: record.get("node_type"),
         properties: JSON.parse(record.get("properties") || "{}"),
       }));
-
-      // Récupérer les arêtes
-      const edgesResult = await session.run(
-        `
-        MATCH (source:GraphNode {graph_id: $graphId})-[r:CONNECTED_TO]->(target:GraphNode {graph_id: $graphId})
-        RETURN id(r) as id, source.node_id as source, target.node_id as target, 
-               r.label as label, r.edge_type as edge_type, r.properties as properties
-        `,
-        { graphId }
-      );
 
       const edges: GraphEdge[] = edgesResult.records.map((record) => ({
         id: record.get("id").toString(),
@@ -183,9 +227,16 @@ export class Neo4jService {
         properties: JSON.parse(record.get("properties") || "{}"),
       }));
 
-      return { nodes, edges };
+      const result: GraphData = { nodes, edges };
+
+      // Mise en cache du résultat
+      if (!bypassCache) {
+        this.graphCache.set(cacheKey, result);
+      }
+
+      return result;
     } finally {
-      await session.close();
+      await Promise.all([sessionNodes.close(), sessionEdges.close()]);
     }
   }
 
@@ -295,7 +346,7 @@ export class Neo4jService {
         }));
 
         nodes.forEach(node => allNodes.set(node.id, node));
-        edges.forEach(edge => allEdges.set(edge.id, edge));
+        edges.forEach(edge => allEdges.set(edge.id ?? edge.source + '-' + edge.target, edge));
       });
 
       return { 
