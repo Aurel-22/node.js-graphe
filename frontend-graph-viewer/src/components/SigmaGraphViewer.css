@@ -1,0 +1,665 @@
+.sigma-graph-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #0f1419 0%, #16213e 100%);
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.sigma-container {
+  width: 100%;
+  height: 100%;
+}
+
+.sigma-controls {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  gap: 10px;
+  z-index: 10;
+}
+
+.sigma-controls button {
+  padding: 10px 16px;
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+}
+
+.sigma-controls button:hover {
+  background: rgba(102, 126, 234, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.sigma-legend {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(15, 20, 25, 0.95);
+  padding: 16px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  z-index: 10;
+  max-width: 250px;
+  max-height: 400px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sigma-legend h4 {
+  margin: 0 0 12px 0;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.legend-items-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 340px;
+}
+
+.legend-items-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.legend-items-scroll::-webkit-scrollbar-track {
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 3px;
+}
+
+.legend-items-scroll::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.4);
+  border-radius: 3px;
+}
+
+.legend-items-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.6);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend-count {
+  font-size: 11px;
+  opacity: 0.7;
+  font-weight: 600;
+  color: #FFD700;
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.sigma-tooltip {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 20, 25, 0.95);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 10;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.sigma-render-time {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(102, 126, 234, 0.2);
+  color: white;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.3s ease-in;
+}
+
+.sigma-render-time strong {
+  color: #FFD700;
+}
+
+.optimization-note {
+  font-size: 11px;
+  opacity: 0.8;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+/* ─── Timing Details ─── */
+.sigma-timing-details {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  background: rgba(30, 30, 50, 0.9);
+  border-radius: 8px;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.sigma-timing-details .timing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: #ccc;
+  font-weight: 600;
+  text-align: left;
+}
+.sigma-timing-details .timing-toggle:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+.sigma-timing-details .timing-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px 10px;
+}
+
+.sigma-timing-details .timing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff;
+  white-space: nowrap;
+}
+.sigma-timing-details .timing-badge strong {
+  font-weight: 700;
+}
+.sigma-timing-details .timing-badge.graph { background: #673AB7; }
+.sigma-timing-details .timing-badge.layout { background: #E91E63; }
+.sigma-timing-details .timing-badge.init { background: #607D8B; }
+.sigma-timing-details .timing-badge.events { background: #795548; }
+.sigma-timing-details .timing-badge.render { background: #FF5722; }
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sigma-stats {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(15, 20, 25, 0.95);
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  z-index: 10;
+}
+
+/* ─── Parameter Panel (dark theme) ─── */
+.sigma-params-panel {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 10;
+  min-width: 260px;
+  max-width: 280px;
+  background: rgba(15, 20, 25, 0.97);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.sigma-params-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+  border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+  transition: background 0.15s;
+}
+
+.sigma-params-header:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.25), rgba(118, 75, 162, 0.25));
+}
+
+.sigma-params-panel .params-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+}
+
+.sigma-params-panel .params-toggle {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.sigma-params-body {
+  padding: 8px 12px 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(102, 126, 234, 0.3) transparent;
+}
+
+.sigma-params-body::-webkit-scrollbar {
+  width: 5px;
+}
+.sigma-params-body::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.3);
+  border-radius: 3px;
+}
+
+.sigma-params-panel .params-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.sigma-params-panel .param-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sigma-params-panel .param-btn.reset {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sigma-params-panel .param-btn.reset:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.sigma-params-panel .param-btn.reheat {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+}
+.sigma-params-panel .param-btn.reheat:hover {
+  background: linear-gradient(135deg, #7b93ff, #8b5fc7);
+}
+
+.sigma-params-panel .params-section {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sigma-params-panel .params-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.sigma-params-panel .section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(102, 126, 234, 0.7);
+  margin-bottom: 6px;
+}
+
+.sigma-params-panel .param-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.sigma-params-panel .param-row.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sigma-params-panel .param-row.checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.sigma-params-panel .param-row.checkbox span {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.sigma-params-panel .param-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.sigma-params-panel .param-value {
+  font-weight: 700;
+  color: #FFD700;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+}
+
+.sigma-params-panel input[type="range"] {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.sigma-params-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: transform 0.1s;
+}
+
+.sigma-params-panel input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.sigma-params-panel input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+}
+
+.empty-state h3 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* Animation de chargement */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.sigma-graph-viewer.loading {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Mode progressif */
+.sigma-progressive-info {
+  position: absolute;
+  top: 80px;
+  right: 20px;
+  background: rgba(76, 175, 80, 0.2);
+  padding: 16px 20px;
+  border-radius: 8px;
+  color: white;
+  font-size: 13px;
+  z-index: 10;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(76, 175, 80, 0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  max-width: 320px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.sigma-progressive-info strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.sigma-progressive-info p {
+  margin: 4px 0;
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+/* Bootstrap Icons animations */
+.bi-spin {
+  animation: bi-spin 1s linear infinite;
+}
+
+@keyframes bi-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sigma-controls button i {
+  margin-right: 2px;
+}
+
+/* ─── Benchmark & Performance Comparison ─── */
+.benchmark-result {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(156, 39, 176, 0.15);
+  border: 1px solid rgba(156, 39, 176, 0.4);
+  border-radius: 6px;
+}
+
+.benchmark-result > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #CE93D8;
+}
+
+.benchmark-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 11px;
+}
+
+.benchmark-label {
+  min-width: 65px;
+  font-weight: 600;
+}
+
+.benchmark-value {
+  font-weight: 700;
+  font-size: 13px;
+  min-width: 55px;
+}
+
+.benchmark-detail {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.benchmark-gain {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.level-timings {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(33, 150, 243, 0.1);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  border-radius: 6px;
+}
+
+.level-timings > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #90CAF9;
+}
+
+.timings-table {
+  font-size: 10px;
+  width: 100%;
+}
+
+.timings-header {
+  display: grid;
+  grid-template-columns: 28px 48px 48px 48px 32px;
+  gap: 4px;
+  font-weight: 700;
+  opacity: 0.6;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  margin-bottom: 4px;
+}
+
+.timings-row {
+  display: grid;
+  grid-template-columns: 28px 48px 48px 48px 32px;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.timings-row .cache-on { color: #4CAF50; }
+.timings-row .cache-off { color: #F44336; }
+
+.timings-summary {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.timings-summary strong {
+  display: inline;
+  font-size: 10px;
+  color: #FFD700;
+}
+
+.sigma-progressive-info::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sigma-progressive-info::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.sigma-progressive-info::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.sigma-controls button:hover i {
+  transform: scale(1.1);
+  transition: transform 0.15s ease;
+}
+
+.empty-state i {
+  display: block;
+  margin-bottom: 12px;
+  color: rgba(102, 126, 234, 0.5);
+}

@@ -1,0 +1,87 @@
+.graph-list {
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+  border-right: 1px solid rgba(102, 126, 234, 0.2);
+  color: white;
+  overflow-y: auto;
+}
+
+.graph-list h2 {
+  margin: 0 0 20px 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.graph-items {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.graph-item {
+  background: rgba(102, 126, 234, 0.08);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.graph-item:hover {
+  background: rgba(102, 126, 234, 0.12);
+  border-color: rgba(102, 126, 234, 0.4);
+  transform: translateX(5px);
+}
+
+.graph-item.selected {
+  background: rgba(102, 126, 234, 0.2);
+  border-color: #667eea;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.graph-item h3 {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.graph-item .description {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+.graph-item .stats {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.graph-item .stat {
+  opacity: 0.95;
+}
+
+.graph-item .type {
+  display: flex;
+  gap: 8px;
+}
+
+.graph-item .badge {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.loading,
+.no-graphs {
+  text-align: center;
+  padding: 40px 20px;
+  opacity: 0.8;
+  font-size: 16px;
+}
