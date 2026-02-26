@@ -146,6 +146,20 @@ export class MssqlService implements GraphDatabaseService {
     console.log("MSSQL initialization complete ✓");
   }
 
+  // ===== Raw Query Execution =====
+
+  async executeRawQuery(
+    query: string,
+    database?: string,
+  ): Promise<{ rows: Record<string, any>[]; elapsed_ms: number; rowCount: number; engine: string }> {
+    const pool = await this.getPool(database);
+    const t0 = Date.now();
+    const result = await pool.request().query(query);
+    const elapsed_ms = Date.now() - t0;
+    const rows = result.recordset || [];
+    return { rows, elapsed_ms, rowCount: rows.length, engine: this.engineName };
+  }
+
   async close(): Promise<void> {
     for (const pool of this.pools.values()) {
       await pool.close();

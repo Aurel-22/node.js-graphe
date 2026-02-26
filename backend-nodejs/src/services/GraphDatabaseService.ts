@@ -67,6 +67,15 @@ export interface GraphDatabaseService {
 
   // ===== Cache =====
 
+  /**
+   * Exécuter une requête brute (SQL pour MSSQL, Cypher pour Neo4j/Memgraph, AQL pour ArangoDB).
+   * Retourne les résultats + le temps d'exécution.
+   */
+  executeRawQuery?(
+    query: string,
+    database?: string,
+  ): Promise<{ rows: Record<string, any>[]; elapsed_ms: number; rowCount: number; engine: string }>;
+
   getCacheStats(): {
     hits: number;
     misses: number;

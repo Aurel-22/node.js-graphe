@@ -8,13 +8,14 @@ import CytoscapeGraphViewer from './components/CytoscapeGraphViewer';
 import VisNetworkViewer from './components/VisNetworkViewer';
 import ForceGraph3DViewer from './components/ForceGraph3DViewer';
 import ImpactAnalysis from './components/ImpactAnalysis';
+import QueryPanel from './components/QueryPanel';
 import { OptimPanel } from './components/OptimPanel';
 import { graphApi, databaseApi, engineApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
 import './App.css';
 
-type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact';
+type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact' | 'query';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -216,6 +217,12 @@ function App() {
             >
               Analyse d'impact
             </button>
+            <button
+              className={viewerType === 'query' ? 'active' : ''}
+              onClick={() => setViewerType('query')}
+            >
+              SQL / Cypher
+            </button>
           </div>
         </div>
         <div className="header-info">
@@ -316,6 +323,14 @@ function App() {
                 engine={selectedEngine || undefined}
               />
             )}
+          </div>
+        ) : viewerType === 'query' ? (
+          <div className="graph-viewer-container">
+            <QueryPanel
+              graphId={selectedGraphId || undefined}
+              database={selectedDatabase || undefined}
+              engine={selectedEngine || undefined}
+            />
           </div>
         ) : (
           <div className="graph-viewer-container">

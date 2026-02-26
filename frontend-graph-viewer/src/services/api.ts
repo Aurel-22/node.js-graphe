@@ -52,6 +52,17 @@ export interface ImpactResult {
   engine: string;
 }
 
+/** Résultat d'exécution d'une requête brute (SQL / Cypher / AQL). */
+export interface RawQueryResult {
+  rows: Record<string, any>[];
+  elapsed_ms: number;
+  rowCount: number;
+  engine: string;
+  error?: string;
+  /** Temps total round-trip (réseau + DB + sérialisation), mesuré côté client. */
+  totalMs?: number;
+}
+
 export interface EngineInfo {
   available: string[];
   default: string;
@@ -154,6 +165,30 @@ export const graphApi = {
   healthCheck: async (): Promise<{ status: string; timestamp: string }> => {
     const response = await api.get('/health');
     return response.data;
+  },
+
+  // Exécuter une requête brute (SQL pour MSSQL, Cypher pour Neo4j/Memgraph)
+  executeQuery: async (
+    query: string,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<RawQueryResult> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    try {
+      const response = await api.post<RawQueryResult>('/query', { query }, { params });
+      return response.data;
+    } catch (err: any) {
+      const errData = err?.response?.data;
+      return {
+        rows: [],
+        elapsed_ms: 0,
+        rowCount: 0,
+        engine: errData?.engine || engine || 'unknown',
+        error: errData?.error || err.message || 'Query failed',
+      };
+    }
   },
 };
 

@@ -132,6 +132,35 @@ app.use("/api/databases", resolveEngine, (req, res, next) => {
   createDatabaseRoutes(service)(req, res, next);
 });
 
+// ===== Raw query execution endpoint =====
+// POST /api/query — execute raw SQL (MSSQL), Cypher (Neo4j/Memgraph), or AQL (ArangoDB)
+app.post("/api/query", resolveEngine, async (req, res, next) => {
+  try {
+    const service: GraphDatabaseService = (req as any).dbService;
+    const { query } = req.body as { query?: string };
+    const database = req.query.database as string | undefined;
+
+    if (!query || typeof query !== "string" || query.trim().length === 0) {
+      return res.status(400).json({ error: "Missing 'query' in request body" });
+    }
+
+    if (!service.executeRawQuery) {
+      return res.status(501).json({ error: `Engine '${service.engineName}' does not support raw queries` });
+    }
+
+    const result = await service.executeRawQuery(query.trim(), database);
+    res.setHeader("X-Response-Time", `${result.elapsed_ms}ms`);
+    res.setHeader("X-Engine", service.engineName);
+    res.json(result);
+  } catch (error: any) {
+    // Return the DB error message for debugging
+    res.status(400).json({
+      error: error.message || "Query execution failed",
+      engine: ((req as any).dbService as GraphDatabaseService)?.engineName,
+    });
+  }
+});
+
 // Health check — liste les moteurs disponibles
 app.get("/api/health", (req, res) => {
   res.json({

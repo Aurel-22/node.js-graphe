@@ -860,6 +860,41 @@ export class Neo4jService implements GraphDatabaseService {
     }
   }
 
+  // ===== Raw Query Execution =====
+
+  async executeRawQuery(
+    query: string,
+    database?: string,
+  ): Promise<{ rows: Record<string, any>[]; elapsed_ms: number; rowCount: number; engine: string }> {
+    const session = this.getSession(database);
+    try {
+      const t0 = Date.now();
+      const result = await session.run(query);
+      const elapsed_ms = Date.now() - t0;
+
+      const rows = result.records.map((record) => {
+        const obj: Record<string, any> = {};
+        record.keys.forEach((key) => {
+          const val = record.get(key);
+          // Convert Neo4j Integer to JS number
+          if (val && typeof val === 'object' && typeof val.toNumber === 'function') {
+            obj[key as string] = val.toNumber();
+          } else if (val && typeof val === 'object' && val.properties) {
+            // Neo4j Node — extract properties
+            obj[key as string] = { ...val.properties, _labels: val.labels };
+          } else {
+            obj[key as string] = val;
+          }
+        });
+        return obj;
+      });
+
+      return { rows, elapsed_ms, rowCount: rows.length, engine: this.engineName };
+    } finally {
+      await session.close();
+    }
+  }
+
   async close(): Promise<void> {
     await this.driver.close();
   }
