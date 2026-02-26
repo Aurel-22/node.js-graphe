@@ -87,6 +87,32 @@ export function graphRoutes(service: GraphDatabaseService) {
     }
   });
 
+  // Server-side impact analysis — POST /graphs/:id/impact
+  // Body: { nodeId: string, depth?: number (1–15, default 5) }
+  // Retourne les nœuds impactés en aval + temps de calcul côté serveur.
+  // Permet de comparer la latence entre le BFS client (graphology) et le moteur serveur.
+  router.post("/graphs/:id/impact", async (req, res, next) => {
+    try {
+      const database = req.query.database as string | undefined;
+      const { nodeId, depth = 5 } = req.body as { nodeId?: string; depth?: number };
+      if (!nodeId) {
+        return res.status(400).json({ error: "Missing nodeId in request body" });
+      }
+      const t0 = Date.now();
+      const result = await service.computeImpact(
+        req.params.id,
+        nodeId,
+        Math.min(Number(depth), 15),
+        database
+      );
+      res.setHeader("X-Response-Time", `${Date.now() - t0}ms`);
+      res.setHeader("X-Engine", service.engineName);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Create a new graph from Mermaid code
   router.post("/graphs", async (req, res, next) => {
     try {

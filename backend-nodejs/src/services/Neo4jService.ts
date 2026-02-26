@@ -7,6 +7,7 @@ import {
   GraphData,
   GraphStats,
   GraphSummary,
+  ImpactResult,
 } from "../models/graph.js";
 import { GraphDatabaseService } from "./GraphDatabaseService.js";
 
@@ -365,6 +366,41 @@ export class Neo4jService implements GraphDatabaseService {
       return { 
         nodes: Array.from(allNodes.values()), 
         edges: Array.from(allEdges.values()) 
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Analyse d'impact côté serveur — propagation BFS sortante via Cypher.
+   * Neo4j/Memgraph : traversée native index-free adjacency O(k^d),
+   * nettement plus rapide que la CTE récursive MSSQL.
+   */
+  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const maxDepth = Math.min(depth, 15);
+    const session = this.getSession(database);
+    try {
+      const result = await session.run(
+        `MATCH path = (source:GraphNode {graph_id: $graphId, node_id: $nodeId})
+               -[:CONNECTED_TO*1..${maxDepth}]->
+               (n:GraphNode {graph_id: $graphId})
+         RETURN n.node_id AS nodeId, min(length(path)) AS level`,
+        { graphId, nodeId }
+      );
+
+      const impactedNodes = result.records.map((r) => ({
+        nodeId: r.get("nodeId") as string,
+        level: this.toNum(r.get("level")),
+      }));
+
+      return {
+        sourceNodeId: nodeId,
+        impactedNodes,
+        depth: maxDepth,
+        elapsed_ms: Date.now() - t0,
+        engine: this.engineName,
       };
     } finally {
       await session.close();

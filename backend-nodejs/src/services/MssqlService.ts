@@ -7,6 +7,7 @@ import {
   GraphData,
   GraphStats,
   GraphSummary,
+  ImpactResult,
 } from "../models/graph.js";
 import { GraphDatabaseService } from "./GraphDatabaseService.js";
 
@@ -464,6 +465,52 @@ export class MssqlService implements GraphDatabaseService {
     }
 
     return { nodes: Array.from(nodeMap.values()), edges: Array.from(edgeMap.values()) };
+  }
+
+  /**
+   * Analyse d'impact côté serveur — propagation BFS sortante via CTE récursive.
+   * AVERTISSEMENT : contrairement à Neo4j/Memgraph (pointeurs directs),
+   * chaque niveau effectue un JOIN sur la table complète → O(k^d × n).
+   * Devient très lent au-delà de depth=4 sur de grands graphes.
+   */
+  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const maxDepth = Math.min(depth, 15);
+    const pool = await this.getPool(database);
+
+    const res = await pool.request()
+      .input("graphId",  sql.NVarChar(255), graphId)
+      .input("nodeId",   sql.NVarChar(255), nodeId)
+      .input("maxDepth", sql.Int,           maxDepth)
+      .query(`
+        -- BFS sortant uniquement (propagation de panne vers l'aval)
+        WITH Impact AS (
+          SELECT node_id, 0 AS lvl
+          FROM graph_nodes
+          WHERE graph_id = @graphId AND node_id = @nodeId
+
+          UNION ALL
+
+          SELECT n.node_id, i.lvl + 1
+          FROM Impact i
+          JOIN graph_edges e ON e.graph_id = @graphId AND e.source_id = i.node_id
+          JOIN graph_nodes n ON n.graph_id = @graphId AND n.node_id   = e.target_id
+          WHERE i.lvl < @maxDepth
+        )
+        SELECT node_id AS nodeId, MIN(lvl) AS level
+        FROM Impact
+        WHERE node_id <> @nodeId
+        GROUP BY node_id
+        OPTION (MAXRECURSION 200)
+      `);
+
+    return {
+      sourceNodeId: nodeId,
+      impactedNodes: res.recordset.map((r: any) => ({ nodeId: r.nodeId, level: r.level })),
+      depth: maxDepth,
+      elapsed_ms: Date.now() - t0,
+      engine: this.engineName,
+    };
   }
 
   // ===== Gestion des bases de données =====

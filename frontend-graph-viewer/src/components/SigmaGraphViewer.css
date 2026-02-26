@@ -486,6 +486,171 @@
   animation: pulse 2s ease-in-out infinite;
 }
 
+/* Node list panel (progressive mode) */
+.sigma-node-list-panel {
+  position: absolute;
+  top: 80px;
+  left: 20px;
+  width: 280px;
+  max-height: calc(100vh - 200px);
+  background: rgba(30, 30, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(100, 140, 255, 0.4);
+  border-radius: 10px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.node-list-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.node-list-header strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.node-list-count {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.node-list-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.node-list-search i {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+.node-list-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+  padding: 4px 0;
+}
+
+.node-list-search input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.node-list-clear {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 10px;
+}
+
+.node-list-clear:hover {
+  color: #fff;
+}
+
+.node-list-items {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+
+.node-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.node-list-item:hover {
+  background: rgba(100, 140, 255, 0.15);
+  border-left-color: #648cff;
+}
+
+.node-list-item.explored {
+  background: rgba(76, 175, 80, 0.1);
+  border-left-color: #4CAF50;
+  opacity: 0.7;
+}
+
+.node-list-item.visible:not(.explored) {
+  border-left-color: rgba(255, 255, 255, 0.2);
+}
+
+.node-list-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.node-list-id {
+  font-family: monospace;
+  font-weight: 600;
+  font-size: 11px;
+  min-width: 70px;
+  color: #90caf9;
+}
+
+.node-list-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.node-list-type {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  font-style: italic;
+}
+
+.node-list-check {
+  color: #4CAF50;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.node-list-empty {
+  padding: 20px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+.node-list-items::-webkit-scrollbar {
+  width: 5px;
+}
+
+.node-list-items::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.node-list-items::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
 /* Mode progressif */
 .sigma-progressive-info {
   position: absolute;

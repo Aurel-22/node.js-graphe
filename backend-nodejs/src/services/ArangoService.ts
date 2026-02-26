@@ -7,6 +7,7 @@ import {
   GraphData,
   GraphStats,
   GraphSummary,
+  ImpactResult,
 } from "../models/graph.js";
 import { GraphDatabaseService } from "./GraphDatabaseService.js";
 
@@ -340,6 +341,39 @@ export class ArangoService implements GraphDatabaseService {
     return {
       nodes: results[0].nodes || [],
       edges: results[0].edges || [],
+    };
+  }
+
+  /**
+   * Analyse d'impact côté serveur — propagation BFS sortante via AQL traversal.
+   */
+  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const maxDepth = Math.min(depth, 15);
+    const db = this.getDb(database);
+
+    const cursor = await db.query(aql`
+      LET startNode = FIRST(
+        FOR n IN graph_nodes
+          FILTER n.graph_id == ${graphId} AND n.node_id == ${nodeId}
+          RETURN n
+      )
+
+      FOR v, e, p IN 1..${maxDepth} OUTBOUND startNode graph_edges
+        FILTER v.graph_id == ${graphId}
+        COLLECT vid = v.node_id
+        AGGREGATE minLevel = MIN(LENGTH(p.edges))
+        RETURN { nodeId: vid, level: minLevel }
+    `);
+
+    const impactedNodes = await cursor.all();
+
+    return {
+      sourceNodeId: nodeId,
+      impactedNodes,
+      depth: maxDepth,
+      elapsed_ms: Date.now() - t0,
+      engine: this.engineName,
     };
   }
 

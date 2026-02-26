@@ -4,7 +4,7 @@
 import neo4jV4 from "neo4j-driver-memgraph";
 import type { Driver, Session } from "neo4j-driver";
 import { Neo4jService } from "./Neo4jService.js";
-import { Graph, GraphNode, GraphEdge } from "../models/graph.js";
+import { Graph, GraphNode, GraphEdge, ImpactResult } from "../models/graph.js";
 
 /**
  * Service Memgraph — hérite de Neo4jService.
@@ -109,6 +109,42 @@ export class MemgraphService extends Neo4jService {
 
   override async deleteDatabase(_databaseName: string): Promise<void> {
     throw new Error("Memgraph does not support multiple databases");
+  }
+
+  /**
+   * Override computeImpact — Memgraph ne supporte pas length(path).
+   * On utilise size(relationships(path)) qui est équivalent.
+   */
+  override async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const maxDepth = Math.min(depth, 15);
+    const session = this.getSession(database);
+    try {
+      const result = await session.run(
+        `MATCH path = (source:GraphNode {graph_id: $graphId, node_id: $nodeId})
+               -[:CONNECTED_TO*1..${maxDepth}]->
+               (n:GraphNode {graph_id: $graphId})
+         RETURN n.node_id AS nodeId, min(size(relationships(path))) AS level`,
+        { graphId, nodeId }
+      );
+
+      const impactedNodes = result.records.map((r: any) => ({
+        nodeId: r.get("nodeId") as string,
+        level: typeof r.get("level")?.toNumber === "function"
+          ? r.get("level").toNumber()
+          : Number(r.get("level")),
+      }));
+
+      return {
+        sourceNodeId: nodeId,
+        impactedNodes,
+        depth: maxDepth,
+        elapsed_ms: Date.now() - t0,
+        engine: this.engineName,
+      };
+    } finally {
+      await session.close();
+    }
   }
 
   // =========================================================

@@ -5,6 +5,7 @@ import {
   GraphEdge,
   GraphStats,
   GraphSummary,
+  ImpactResult,
 } from "../models/graph.js";
 
 /**
@@ -51,6 +52,18 @@ export interface GraphDatabaseService {
     depth: number,
     database?: string,
   ): Promise<GraphData>;
+
+  /**
+   * Analyse d'impact côté serveur : BFS depuis nodeId sur les arêtes sortantes.
+   * Retourne les nœuds impactés avec leur niveau (distance depuis la source).
+   * Plus lent sur MSSQL (CTE récursive) qu'sur Neo4j/Memgraph (Cypher natif).
+   */
+  computeImpact(
+    graphId: string,
+    nodeId: string,
+    depth: number,
+    database?: string,
+  ): Promise<ImpactResult>;
 
   // ===== Cache =====
 

@@ -654,6 +654,37 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
   const currentDepthRef = useRef<number>(0);
   const visibleNodesRef = useRef<Set<string>>(new Set());
 
+  // Node list for progressive mode
+  const MAX_NODE_LIST = 100;
+  const [nodeListFilter, setNodeListFilter] = useState('');
+  const [exploredNodes, setExploredNodes] = useState<Set<string>>(new Set());
+
+  // Build a sampled node list (max 100 for large graphs)
+  const nodeList = useMemo(() => {
+    if (!data || data.nodes.length === 0) return [];
+    const all = data.nodes;
+    if (all.length <= MAX_NODE_LIST) return all;
+    // Deterministic shuffle using Fisher-Yates with a seeded index
+    const sampled: GraphNode[] = [];
+    const indices = Array.from({ length: all.length }, (_, i) => i);
+    for (let i = 0; i < MAX_NODE_LIST; i++) {
+      const j = i + ((i * 2654435761) >>> 0) % (indices.length - i);
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+      sampled.push(all[indices[i]]);
+    }
+    return sampled.sort((a, b) => a.id.localeCompare(b.id));
+  }, [data]);
+
+  const filteredNodeList = useMemo(() => {
+    if (!nodeListFilter) return nodeList;
+    const q = nodeListFilter.toLowerCase();
+    return nodeList.filter(n =>
+      n.id.toLowerCase().includes(q) ||
+      (n.label || '').toLowerCase().includes(q) ||
+      (n.node_type || '').toLowerCase().includes(q)
+    );
+  }, [nodeList, nodeListFilter]);
+
   useEffect(() => { progressiveModeRef.current = progressiveMode; }, [progressiveMode]);
   useEffect(() => { currentDepthRef.current = currentDepth; }, [currentDepth]);
   useEffect(() => { visibleNodesRef.current = visibleNodes; }, [visibleNodes]);
@@ -723,6 +754,128 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     }
     return adj;
   }, [data]);
+
+  // ─── Progressive: explore a node from the list ───
+  const exploreNode = useCallback((nodeId: string) => {
+    if (!graphRef.current || !data || data.nodes.length === 0) return;
+
+    const graph = graphRef.current;
+    const p = renderParamsRef.current;
+    const withCache = useCacheRef.current;
+    const cachedPositions = (withCache && graphId) ? nodePositionCache.getGraphPositions(graphId) : {};
+    const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
+
+    const currentNodes = new Set<string>();
+    graph.forEachNode((n) => currentNodes.add(n));
+
+    const typeMap = new Map<string, { color: string; count: number }>();
+    nodeTypes.forEach(({ type, color, count }) => typeMap.set(type, { color, count }));
+
+    // Add the clicked node if not already present
+    const newNodeIds = new Set<string>();
+    if (!currentNodes.has(nodeId)) newNodeIds.add(nodeId);
+
+    // Add its direct neighbors
+    const neighbors = adjacency.get(nodeId);
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        if (!currentNodes.has(neighbor)) newNodeIds.add(neighbor);
+      }
+    }
+    // Also add nodes that point TO this node (upstream)
+    for (const edge of data.edges) {
+      if (edge.target === nodeId && !currentNodes.has(edge.source)) {
+        newNodeIds.add(edge.source);
+      }
+    }
+
+    if (newNodeIds.size === 0 && currentNodes.has(nodeId)) {
+      // Node already fully explored, just mark it
+      setExploredNodes(prev => new Set([...prev, nodeId]));
+      return;
+    }
+
+    for (const nId of newNodeIds) {
+      const nodeData = nodeIndex.get(nId);
+      if (!nodeData) continue;
+      const nodeType = nodeData.node_type || 'default';
+      const color = NODE_COLORS[nodeType] || generateColorFromString(nodeType);
+      const existing = typeMap.get(nodeType);
+      if (existing) existing.count++;
+      else typeMap.set(nodeType, { color, count: 1 });
+      const cachedPos = cachedPositions[nId];
+      graph.addNode(nId, {
+        label: nodeData.label || nId,
+        size: p.nodeSize,
+        color,
+        x: cachedPos?.x ?? Math.random() * 500,
+        y: cachedPos?.y ?? Math.random() * 500,
+        type: 'pictogram',
+        nodeType,
+        image: getNodeIcon(nodeType),
+        pictoColor: '#fff',
+      });
+    }
+
+    // Add edges between all visible nodes
+    const allVisible = new Set([...currentNodes, ...newNodeIds]);
+    const existingEdges = new Set<string>();
+    graph.forEachEdge((_edge, _attrs, source, target) => existingEdges.add(`${source}->${target}`));
+
+    data.edges.forEach((edge) => {
+      if (allVisible.has(edge.source) && allVisible.has(edge.target)) {
+        const key = `${edge.source}->${edge.target}`;
+        if (!existingEdges.has(key)) {
+          existingEdges.add(key);
+          try {
+            graph.addEdge(edge.source, edge.target, {
+              size: p.edgeSize,
+              color: edgeColorStr,
+              type: p.showArrows ? 'arrow' : 'line',
+            });
+          } catch (e) { /* skip duplicate */ }
+        }
+      }
+    });
+
+    // Layout
+    const allNewNodesCached = withCache && newNodeIds.size > 0 &&
+      [...newNodeIds].every(nId => cachedPositions[nId]);
+    if (!allNewNodesCached && graph.order > 1) {
+      try {
+        const settings = forceAtlas2.inferSettings(graph);
+        const count = graph.order;
+        const iters = count > 10000 ? 10 : count > 5000 ? 15 : count > 1000 ? 20 : 30;
+        forceAtlas2.assign(graph, {
+          iterations: iters,
+          settings: {
+            ...settings,
+            gravity: count > 5000 ? 0.3 : 1,
+            scalingRatio: count > 5000 ? 10 : 5,
+            barnesHutOptimize: count > 1000,
+          },
+        });
+      } catch (error) {
+        console.error('Layout error:', error);
+      }
+    }
+
+    if (graphId) {
+      const positions: Record<string, { x: number; y: number }> = {};
+      graph.forEachNode((nId, attrs) => { positions[nId] = { x: attrs.x, y: attrs.y }; });
+      nodePositionCache.setGraphPositions(graphId, positions);
+    }
+
+    setNodeTypes(
+      Array.from(typeMap.entries())
+        .map(([type, { color, count }]) => ({ type, color, count }))
+        .sort((a, b) => b.count - a.count)
+    );
+    setVisibleNodes(allVisible);
+    setExploredNodes(prev => new Set([...prev, nodeId]));
+    setCurrentDepth(prev => prev + 1);
+    sigmaRef.current?.refresh();
+  }, [data, adjacency, nodeIndex, graphId, nodeTypes]);
 
   // ─── Progressive: load next level ───
   const loadNextLevel = useCallback(() => {
@@ -972,6 +1125,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     setNodeTypes([]);
     setLevelTimings([]);
     setBenchmarkResult(null);
+    setExploredNodes(new Set());
+    setNodeListFilter('');
     // Increment resetKey to trigger full rebuild of graph + Sigma
     setResetKey(k => k + 1);
   }, [data]);
@@ -998,26 +1153,10 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     let tLayoutEnd = tBuildStart;
 
     if (progressiveMode) {
-      const firstNode = data.nodes[0];
-      if (firstNode) {
-        const nodeType = firstNode.node_type || 'default';
-        const color = NODE_COLORS[nodeType] || generateColorFromString(nodeType);
-        typeMap.set(nodeType, { color, count: 1 });
-        const cachedPos = cachedPositions[firstNode.id];
-        graph.addNode(firstNode.id, {
-          label: firstNode.label || firstNode.id,
-          size: p.nodeSize,
-          color,
-          x: cachedPos?.x ?? 50,
-          y: cachedPos?.y ?? 50,
-          type: 'pictogram',
-          nodeType,
-          image: getNodeIcon(nodeType),
-          pictoColor: '#fff',
-        });
-        setVisibleNodes(new Set([firstNode.id]));
-        setCurrentDepth(0);
-      }
+      // Start with an empty graph — user picks nodes from the list
+      setVisibleNodes(new Set());
+      setCurrentDepth(0);
+      setExploredNodes(new Set());
     } else {
       const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
 
@@ -1492,6 +1631,64 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
       </div>
 
       <div ref={containerRef} className="sigma-container" />
+
+      {/* Node list panel for progressive mode */}
+      {progressiveMode && data && (
+        <div className="sigma-node-list-panel">
+          <div className="node-list-header">
+            <strong><i className="bi bi-list-ul"></i> Liste des nœuds</strong>
+            <span className="node-list-count">
+              {data.nodes.length > MAX_NODE_LIST
+                ? `${MAX_NODE_LIST} / ${data.nodes.length.toLocaleString()} (échantillon)`
+                : `${data.nodes.length} nœuds`
+              }
+            </span>
+          </div>
+          <div className="node-list-search">
+            <i className="bi bi-search"></i>
+            <input
+              type="text"
+              placeholder="Filtrer par id, label ou type..."
+              value={nodeListFilter}
+              onChange={(e) => setNodeListFilter(e.target.value)}
+            />
+            {nodeListFilter && (
+              <button className="node-list-clear" onClick={() => setNodeListFilter('')}>
+                <i className="bi bi-x-lg"></i>
+              </button>
+            )}
+          </div>
+          <div className="node-list-items">
+            {filteredNodeList.map((node) => {
+              const isExplored = exploredNodes.has(node.id);
+              const isVisible = visibleNodes.has(node.id);
+              const color = NODE_COLORS[node.node_type || 'default'] || generateColorFromString(node.node_type || 'default');
+              return (
+                <div
+                  key={node.id}
+                  className={`node-list-item ${isExplored ? 'explored' : ''} ${isVisible ? 'visible' : ''}`}
+                  onClick={() => exploreNode(node.id)}
+                  title={`Cliquer pour explorer ${node.id} et ses voisins`}
+                >
+                  <span
+                    className="node-list-dot"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="node-list-id">{node.id}</span>
+                  <span className="node-list-label">{node.label || ''}</span>
+                  <span className="node-list-type">{node.node_type || ''}</span>
+                  {isExplored && <i className="bi bi-check-circle-fill node-list-check"></i>}
+                </div>
+              );
+            })}
+            {filteredNodeList.length === 0 && (
+              <div className="node-list-empty">
+                <i className="bi bi-emoji-frown"></i> Aucun nœud trouvé
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {progressiveMode && data && (
         <div className="sigma-progressive-info">

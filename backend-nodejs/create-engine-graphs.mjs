@@ -1,16 +1,18 @@
 /**
- * Crée 4 graphes multi-communautés via l'API REST sur n'importe quel engine.
+ * Crée des graphes multi-communautés via l'API REST sur n'importe quel engine.
  *
  *   - 1 000  nœuds  (~3 000  arêtes)
  *   - 2 000  nœuds  (~6 000  arêtes)
  *   - 5 000  nœuds  (~15 000 arêtes)
  *   - 10 000 nœuds  (~30 000 arêtes)
+ *   - 20 000 nœuds  (~60 000 arêtes)
+ *   - 30 000 nœuds  (~90 000 arêtes)
  *
  * Usage :
  *   node create-engine-graphs.mjs --engine=neo4j
  *   node create-engine-graphs.mjs --engine=memgraph
  *   node create-engine-graphs.mjs --engine=mssql
- *   node create-engine-graphs.mjs --engine=neo4j --sizes=1000,5000
+ *   node create-engine-graphs.mjs --engine=neo4j --sizes=20000,30000
  */
 
 const API_BASE = 'http://127.0.0.1:8080/api';
@@ -28,7 +30,7 @@ const DB_MAP = { neo4j: 'neo4j', memgraph: '', mssql: 'graph_db', arangodb: '_sy
 const dbArg = process.argv.find(a => a.startsWith('--database='));
 const DATABASE = dbArg ? dbArg.replace('--database=', '') : (DB_MAP[ENGINE] ?? '');
 
-const allSizes = [1_000, 2_000, 5_000, 10_000];
+const allSizes = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000];
 const sizesArg = process.argv.find(a => a.startsWith('--sizes='));
 const SIZES = sizesArg
   ? sizesArg.replace('--sizes=', '').split(',').map(Number)
@@ -43,10 +45,12 @@ const EDGE_TYPES = ['calls', 'depends_on', 'reads', 'writes', 'triggers', 'valid
 
 // ─── Génération du graphe (~3 arêtes/nœud) ───────────────────────────────────
 function generateGraph(nodeCount) {
-  const communityCount = nodeCount <= 1_000 ? 5
-                       : nodeCount <= 2_000 ? 8
-                       : nodeCount <= 5_000 ? 10
-                       : 15;
+  const communityCount = nodeCount <= 1_000  ?  5
+                       : nodeCount <= 2_000  ?  8
+                       : nodeCount <= 5_000  ? 10
+                       : nodeCount <= 10_000 ? 15
+                       : nodeCount <= 20_000 ? 20
+                       : 25;
   const nodesPerCommunity = Math.floor(nodeCount / communityCount);
 
   const nodes = [];

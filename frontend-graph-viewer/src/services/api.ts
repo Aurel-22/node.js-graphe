@@ -43,6 +43,15 @@ export interface CacheStats {
   keys: string[];
 }
 
+/** Résultat d'une analyse d'impact côté serveur. */
+export interface ImpactResult {
+  sourceNodeId: string;
+  impactedNodes: Array<{ nodeId: string; level: number }>;
+  depth: number;
+  elapsed_ms: number;
+  engine: string;
+}
+
 export interface EngineInfo {
   available: string[];
   default: string;
@@ -119,6 +128,25 @@ export const graphApi = {
     if (database) params.database = database;
     if (engine) params.engine = engine;
     const response = await api.get<GraphData>(`/graphs/${graphId}/nodes/${nodeId}/neighbors`, { params });
+    return response.data;
+  },
+
+  // Analyse d'impact côté serveur — compare BFS natif (Neo4j/Memgraph) vs CTE récursive (MSSQL)
+  computeImpact: async (
+    graphId: string,
+    nodeId: string,
+    depth: number = 5,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<ImpactResult> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.post<ImpactResult>(
+      `/graphs/${graphId}/impact`,
+      { nodeId, depth },
+      { params },
+    );
     return response.data;
   },
 

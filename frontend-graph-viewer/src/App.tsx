@@ -309,7 +309,12 @@ function App() {
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <ImpactAnalysis data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <ImpactAnalysis
+                data={rawGraphData}
+                graphId={selectedGraphId || undefined}
+                database={selectedDatabase || undefined}
+                engine={selectedEngine || undefined}
+              />
             )}
           </div>
         ) : (

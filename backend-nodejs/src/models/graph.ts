@@ -55,3 +55,20 @@ export interface CreateGraphRequest {
   nodes?: Array<{ id: string; label: string; node_type: string; properties?: Record<string, any> }>;
   edges?: Array<{ source: string; target: string; label?: string; edge_type: string; properties?: Record<string, any> }>;
 }
+
+/**
+ * Résultat d'une analyse d'impact côté serveur.
+ * Retourné par le endpoint POST /api/graphs/:id/impact
+ */
+export interface ImpactResult {
+  /** Nœud source (point de panne) */
+  sourceNodeId: string;
+  /** Nœuds impactés en aval, avec leur niveau de propagation */
+  impactedNodes: Array<{ nodeId: string; level: number }>;
+  /** Profondeur maximale utilisée */
+  depth: number;
+  /** Temps d'exécution en millisecondes (mesure serveur) */
+  elapsed_ms: number;
+  /** Moteur de base de données ayant produit ce résultat */
+  engine: string;
+}
