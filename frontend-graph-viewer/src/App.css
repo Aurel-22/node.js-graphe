@@ -17,18 +17,18 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #0a0a0f;
+  background: var(--bg-primary);
 }
 
 .app-header {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  color: white;
+  background: linear-gradient(135deg, var(--bg-header) 0%, var(--bg-header-end) 100%);
+  color: var(--text-primary);
   padding: 20px 30px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  border-bottom: 1px solid rgba(102, 126, 234, 0.3);
+  box-shadow: var(--header-shadow);
+  border-bottom: 1px solid var(--border-accent);
   z-index: 100;
   gap: 20px;
 }
@@ -46,27 +46,30 @@ body {
   gap: 20px;
 }
 
+.engine-selector,
 .database-selector {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-toggle);
   padding: 8px 16px;
   border-radius: 8px;
   backdrop-filter: blur(10px);
 }
 
+.engine-selector label,
 .database-selector label {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 
+.engine-selector select,
 .database-selector select {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-accent);
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 14px;
@@ -76,35 +79,39 @@ body {
   min-width: 120px;
 }
 
+.engine-selector select:hover,
 .database-selector select:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
+.engine-selector select:focus,
 .database-selector select:focus {
   outline: none;
   border-color: rgba(255, 255, 255, 0.5);
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1);
 }
 
+.engine-selector select option,
 .database-selector select option {
-  background: #0f1419;
-  color: white;
+  background: var(--select-option-bg);
+  color: var(--text-primary);
 }
 
 .viewer-toggle {
   display: flex;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--bg-toggle);
   border-radius: 12px;
   padding: 4px;
   gap: 4px;
   backdrop-filter: blur(10px);
+  flex-wrap: wrap;
 }
 
 .viewer-toggle button {
   padding: 10px 20px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   cursor: pointer;
   border-radius: 8px;
   font-size: 14px;
@@ -114,14 +121,14 @@ body {
 }
 
 .viewer-toggle button:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
 }
 
 .viewer-toggle button.active {
-  background: rgba(255, 255, 255, 0.25);
-  color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .header-info {
@@ -145,7 +152,7 @@ body {
 }
 
 .error-banner {
-  background: #f44336;
+  background: var(--error-bg);
   color: white;
   padding: 15px 30px;
   display: flex;
@@ -156,7 +163,7 @@ body {
 
 .error-banner button {
   background: white;
-  color: #f44336;
+  color: var(--error-bg);
   border: none;
   padding: 8px 16px;
   border-radius: 4px;
@@ -164,6 +171,45 @@ body {
   font-weight: 600;
   transition: transform 0.2s;
 }
+
+/* ═══ Theme toggle ═══ */
+.theme-toggle {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-toggle);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.3s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  transform: rotate(15deg);
+}
+
+/* ═══ Graph viewer container — relative for export panel ═══ */
+.graph-viewer-container {
+  position: relative;
+}
+
+/* ═══ WS status dot ═══ */
+.ws-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.ws-dot.connected { background: #4CAF50; box-shadow: 0 0 6px #4CAF50; }
+.ws-dot.disconnected { background: #F44336; }
 
 .error-banner button:hover {
   transform: scale(1.05);

@@ -1,11 +1,11 @@
 /**
- * Crée un graphe de 30 000 nœuds avec une structure multi-communautés réaliste.
+ * Crée un graphe de 40 000 nœuds avec une structure multi-communautés réaliste.
  * 
  * Structure :
- * - 15 communautés de 2 000 nœuds chacune
+ * - 20 communautés de 2 000 nœuds chacune
  * - Connexions denses INTRA-communauté (chaque nœud a 3-8 voisins locaux)
  * - Ponts INTER-communautés (hubs qui relient les clusters)
- * - ~150 000 arêtes au total (~5 par nœud en moyenne)
+ * - ~200 000 arêtes au total (~5 par nœud en moyenne)
  * 
  * Utilise UNWIND pour des batch inserts rapides.
  */
@@ -19,15 +19,16 @@ const URI = process.env.NEO4J_URI || 'neo4j://127.0.0.1:7687';
 const USER = process.env.NEO4J_USER || 'neo4j';
 const PASSWORD = process.env.NEO4J_PASSWORD;
 
-const GRAPH_ID = 'community_30k';
-const NODE_COUNT = 30_000;
-const COMMUNITY_COUNT = 15;
+const GRAPH_ID = 'community_40k';
+const NODE_COUNT = 40_000;
+const COMMUNITY_COUNT = 20;
 const NODES_PER_COMMUNITY = NODE_COUNT / COMMUNITY_COUNT; // 2000
 
 const NODE_TYPES = [
   'process', 'service', 'database', 'api', 'user',
   'system', 'queue', 'notification', 'validation', 'action',
-  'gateway', 'cache', 'scheduler', 'monitor', 'storage'
+  'gateway', 'cache', 'scheduler', 'monitor', 'storage',
+  'proxy', 'worker', 'broker', 'registry', 'controller'
 ];
 const EDGE_TYPES = ['calls', 'depends_on', 'reads', 'writes', 'triggers', 'validates', 'notifies', 'queues'];
 
@@ -104,7 +105,7 @@ for (let c = 0; c < COMMUNITY_COUNT; c++) {
       }
     }
 
-    // 8. Connexion +50 (medium range, pour plus de densité)
+    // 8. Connexion +50 (medium range)
     if (i + 50 < NODES_PER_COMMUNITY && i % 7 === 0) {
       addEdge(nodeId, `C${c}_N${i + 50}`, 'notifies');
     }
@@ -113,11 +114,24 @@ for (let c = 0; c < COMMUNITY_COUNT; c++) {
     if (i + 100 < NODES_PER_COMMUNITY && i % 10 === 0) {
       addEdge(nodeId, `C${c}_N${i + 100}`, 'queues');
     }
+
+    // 10. Connexion +200 (très long range)
+    if (i + 200 < NODES_PER_COMMUNITY && i % 15 === 0) {
+      addEdge(nodeId, `C${c}_N${i + 200}`, 'depends_on');
+    }
   }
 
   // Hub nodes — le nœud 0 de chaque communauté est un hub interne
   for (let j = 50; j < NODES_PER_COMMUNITY; j += 50) {
     addEdge(`C${c}_N0`, `C${c}_N${j}`, 'queues');
+  }
+
+  // Secondary hubs au milieu de chaque communauté
+  const midNode = Math.floor(NODES_PER_COMMUNITY / 2);
+  for (let j = 100; j < NODES_PER_COMMUNITY; j += 100) {
+    if (j !== midNode) {
+      addEdge(`C${c}_N${midNode}`, `C${c}_N${j}`, 'calls');
+    }
   }
 }
 
@@ -126,11 +140,13 @@ for (let c = 0; c < COMMUNITY_COUNT; c++) {
   const nextC = (c + 1) % COMMUNITY_COUNT;
   const oppositeC = (c + Math.floor(COMMUNITY_COUNT / 2)) % COMMUNITY_COUNT;
   const thirdC = (c + Math.floor(COMMUNITY_COUNT / 3)) % COMMUNITY_COUNT;
+  const fourthC = (c + Math.floor(COMMUNITY_COUNT / 4)) % COMMUNITY_COUNT;
 
   // Hub-to-hub
   addEdge(`C${c}_N0`, `C${nextC}_N0`, 'calls');
   addEdge(`C${c}_N0`, `C${oppositeC}_N0`, 'depends_on');
   addEdge(`C${c}_N0`, `C${thirdC}_N0`, 'triggers');
+  addEdge(`C${c}_N0`, `C${fourthC}_N0`, 'reads');
 
   // Ponts répartis entre communautés adjacentes
   for (let i = 100; i < NODES_PER_COMMUNITY; i += 100) {
@@ -144,10 +160,16 @@ for (let c = 0; c < COMMUNITY_COUNT; c++) {
     addEdge(`C${c}_N${i}`, `C${targetC}_N${targetNode}`, 'notifies');
   }
 
-  // Extra cross-community bridges pour 30K
+  // Extra cross-community bridges
   for (let i = 250; i < NODES_PER_COMMUNITY; i += 500) {
     const targetC = (c + 4) % COMMUNITY_COUNT;
     addEdge(`C${c}_N${i}`, `C${targetC}_N${i}`, 'reads');
+  }
+
+  // Diagonal bridges pour 50K
+  for (let i = 500; i < NODES_PER_COMMUNITY; i += 750) {
+    const targetC = (c + 6) % COMMUNITY_COUNT;
+    addEdge(`C${c}_N${i}`, `C${targetC}_N${NODES_PER_COMMUNITY - i}`, 'writes');
   }
 }
 
@@ -185,7 +207,7 @@ try {
     })`,
     {
       graphId: GRAPH_ID,
-      title: 'Community Graph 30K',
+      title: 'Community Graph 50K',
       description: `Graphe réaliste de ${NODE_COUNT} nœuds organisés en ${COMMUNITY_COUNT} communautés interconnectées (${NODE_TYPES.join(', ')})`,
       graphType: 'network',
       nodeCount: neo4j.int(nodes.length),

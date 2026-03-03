@@ -1,13 +1,13 @@
 /**
- * Crée un graphe de 30 000 nœuds avec une structure multi-communautés réaliste.
+ * Crée un graphe de 1 000 nœuds avec une structure multi-communautés réaliste.
  * 
  * Structure :
- * - 15 communautés de 2 000 nœuds chacune
+ * - 5 communautés de ~200 nœuds chacune
  * - Connexions denses INTRA-communauté (chaque nœud a 3-8 voisins locaux)
  * - Ponts INTER-communautés (hubs qui relient les clusters)
- * - ~150 000 arêtes au total (~5 par nœud en moyenne)
+ * - ~5 000 arêtes au total (~5 par nœud en moyenne)
  * 
- * Utilise UNWIND pour des batch inserts rapides.
+ * Utilise UNWIND pour des batch inserts rapides (2 requêtes au lieu de 1000+)
  */
 
 import neo4j from 'neo4j-driver';
@@ -19,16 +19,12 @@ const URI = process.env.NEO4J_URI || 'neo4j://127.0.0.1:7687';
 const USER = process.env.NEO4J_USER || 'neo4j';
 const PASSWORD = process.env.NEO4J_PASSWORD;
 
-const GRAPH_ID = 'community_30k';
-const NODE_COUNT = 30_000;
-const COMMUNITY_COUNT = 15;
-const NODES_PER_COMMUNITY = NODE_COUNT / COMMUNITY_COUNT; // 2000
+const GRAPH_ID = 'community_1k';
+const NODE_COUNT = 1_000;
+const COMMUNITY_COUNT = 5;
+const NODES_PER_COMMUNITY = NODE_COUNT / COMMUNITY_COUNT; // 200
 
-const NODE_TYPES = [
-  'process', 'service', 'database', 'api', 'user',
-  'system', 'queue', 'notification', 'validation', 'action',
-  'gateway', 'cache', 'scheduler', 'monitor', 'storage'
-];
+const NODE_TYPES = ['process', 'service', 'database', 'api', 'user', 'system', 'queue', 'notification', 'validation', 'action'];
 const EDGE_TYPES = ['calls', 'depends_on', 'reads', 'writes', 'triggers', 'validates', 'notifies', 'queues'];
 
 console.log(`\n🔧 Génération du graphe "${GRAPH_ID}" — ${NODE_COUNT} nœuds, ${COMMUNITY_COUNT} communautés\n`);
@@ -38,8 +34,8 @@ const nodes = [];
 for (let i = 0; i < NODE_COUNT; i++) {
   const community = Math.floor(i / NODES_PER_COMMUNITY);
   const localIndex = i % NODES_PER_COMMUNITY;
-  const nodeType = NODE_TYPES[community];
-
+  const nodeType = NODE_TYPES[community]; // Chaque communauté a un type dominant
+  
   nodes.push({
     node_id: `C${community}_N${localIndex}`,
     label: `${nodeType.charAt(0).toUpperCase() + nodeType.slice(1)} ${community}.${localIndex}`,
@@ -63,39 +59,41 @@ function addEdge(source, target, edgeType) {
 }
 
 for (let c = 0; c < COMMUNITY_COUNT; c++) {
+  const base = c * NODES_PER_COMMUNITY;
+  
   for (let i = 0; i < NODES_PER_COMMUNITY; i++) {
     const nodeId = `C${c}_N${i}`;
-
-    // 1. Chaîne linéaire
+    
+    // 1. Chaîne linéaire (next)
     if (i < NODES_PER_COMMUNITY - 1) {
       addEdge(nodeId, `C${c}_N${i + 1}`, 'calls');
     }
-
+    
     // 2. Connexion +3 (voisinage proche)
     if (i + 3 < NODES_PER_COMMUNITY) {
       addEdge(nodeId, `C${c}_N${i + 3}`, 'depends_on');
     }
-
+    
     // 3. Connexion +7 (voisinage moyen)
     if (i + 7 < NODES_PER_COMMUNITY && i % 2 === 0) {
       addEdge(nodeId, `C${c}_N${i + 7}`, 'reads');
     }
-
+    
     // 4. Connexion +15 (intra-cluster long range)
     if (i + 15 < NODES_PER_COMMUNITY && i % 3 === 0) {
       addEdge(nodeId, `C${c}_N${i + 15}`, 'triggers');
     }
-
+    
     // 5. Connexion +30 (cross-cluster interne)
     if (i + 30 < NODES_PER_COMMUNITY && i % 5 === 0) {
       addEdge(nodeId, `C${c}_N${i + 30}`, 'writes');
     }
-
+    
     // 6. Retour arrière partiel
     if (i > 5 && i % 4 === 0) {
       addEdge(nodeId, `C${c}_N${i - 5}`, 'validates');
     }
-
+    
     // 7. Connexion aléatoire locale (déterministe basée sur i)
     if (i % 6 === 0) {
       const offset = 10 + (i % 20);
@@ -103,51 +101,32 @@ for (let c = 0; c < COMMUNITY_COUNT; c++) {
         addEdge(nodeId, `C${c}_N${i + offset}`, EDGE_TYPES[i % EDGE_TYPES.length]);
       }
     }
-
-    // 8. Connexion +50 (medium range, pour plus de densité)
-    if (i + 50 < NODES_PER_COMMUNITY && i % 7 === 0) {
-      addEdge(nodeId, `C${c}_N${i + 50}`, 'notifies');
-    }
-
-    // 9. Connexion +100 (long range interne)
-    if (i + 100 < NODES_PER_COMMUNITY && i % 10 === 0) {
-      addEdge(nodeId, `C${c}_N${i + 100}`, 'queues');
-    }
   }
-
-  // Hub nodes — le nœud 0 de chaque communauté est un hub interne
+  
+  // 8. Hub nodes — le nœud 0 de chaque communauté est un hub interne
   for (let j = 50; j < NODES_PER_COMMUNITY; j += 50) {
     addEdge(`C${c}_N0`, `C${c}_N${j}`, 'queues');
   }
 }
 
-// Ponts INTER-communautés
+// 9. Ponts INTER-communautés — relient les clusters entre eux
 for (let c = 0; c < COMMUNITY_COUNT; c++) {
   const nextC = (c + 1) % COMMUNITY_COUNT;
-  const oppositeC = (c + Math.floor(COMMUNITY_COUNT / 2)) % COMMUNITY_COUNT;
-  const thirdC = (c + Math.floor(COMMUNITY_COUNT / 3)) % COMMUNITY_COUNT;
-
+  const oppositeC = (c + 5) % COMMUNITY_COUNT;
+  
   // Hub-to-hub
   addEdge(`C${c}_N0`, `C${nextC}_N0`, 'calls');
   addEdge(`C${c}_N0`, `C${oppositeC}_N0`, 'depends_on');
-  addEdge(`C${c}_N0`, `C${thirdC}_N0`, 'triggers');
-
+  
   // Ponts répartis entre communautés adjacentes
   for (let i = 100; i < NODES_PER_COMMUNITY; i += 100) {
     addEdge(`C${c}_N${i}`, `C${nextC}_N${i}`, 'triggers');
   }
-
+  
   // Ponts aléatoires (déterministes) entre communautés éloignées
-  for (let i = 50; i < NODES_PER_COMMUNITY; i += 200) {
+  for (let i = 50; i < NODES_PER_COMMUNITY; i += 250) {
     const targetC = (c + 3) % COMMUNITY_COUNT;
-    const targetNode = Math.abs(NODES_PER_COMMUNITY - 1 - i) % NODES_PER_COMMUNITY;
-    addEdge(`C${c}_N${i}`, `C${targetC}_N${targetNode}`, 'notifies');
-  }
-
-  // Extra cross-community bridges pour 30K
-  for (let i = 250; i < NODES_PER_COMMUNITY; i += 500) {
-    const targetC = (c + 4) % COMMUNITY_COUNT;
-    addEdge(`C${c}_N${i}`, `C${targetC}_N${i}`, 'reads');
+    addEdge(`C${c}_N${i}`, `C${targetC}_N${NODES_PER_COMMUNITY - 1 - i}`, 'notifies');
   }
 }
 
@@ -159,7 +138,7 @@ const session = driver.session({ database: 'neo4j' });
 
 try {
   const startTime = Date.now();
-
+  
   // 1. Supprimer l'ancien graphe s'il existe
   console.log(`\n🗑️  Suppression de l'ancien graphe "${GRAPH_ID}" si existant...`);
   await session.run(
@@ -171,7 +150,7 @@ try {
     { graphId: GRAPH_ID }
   );
 
-  // 2. Créer les métadonnées du graphe
+  // 2. Créer le métadonnées du graphe
   console.log('📝 Création des métadonnées...');
   await session.run(
     `CREATE (g:Graph {
@@ -185,7 +164,7 @@ try {
     })`,
     {
       graphId: GRAPH_ID,
-      title: 'Community Graph 30K',
+      title: 'Community Graph 5K',
       description: `Graphe réaliste de ${NODE_COUNT} nœuds organisés en ${COMMUNITY_COUNT} communautés interconnectées (${NODE_TYPES.join(', ')})`,
       graphType: 'network',
       nodeCount: neo4j.int(nodes.length),
@@ -194,10 +173,10 @@ try {
     }
   );
 
-  // 3. Batch insert nœuds avec UNWIND
-  const BATCH_SIZE = 2000;
+  // 3. Batch insert nœuds avec UNWIND (par batches de 1000)
+  const BATCH_SIZE = 1000;
   console.log(`\n📦 Insertion des nœuds par batches de ${BATCH_SIZE}...`);
-
+  
   for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
     const batch = nodes.slice(i, i + BATCH_SIZE);
     await session.run(
@@ -214,9 +193,9 @@ try {
     console.log(`   Nœuds: ${Math.min(i + BATCH_SIZE, nodes.length)} / ${nodes.length}`);
   }
 
-  // 4. Batch insert arêtes avec UNWIND
+  // 4. Batch insert arêtes avec UNWIND (par batches de 1000)
   console.log(`\n🔗 Insertion des arêtes par batches de ${BATCH_SIZE}...`);
-
+  
   for (let i = 0; i < edges.length; i += BATCH_SIZE) {
     const batch = edges.slice(i, i + BATCH_SIZE);
     await session.run(

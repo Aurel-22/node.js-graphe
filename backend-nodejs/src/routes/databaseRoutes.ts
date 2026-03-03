@@ -1,13 +1,13 @@
 import express, { Request, Response } from "express";
-import { Neo4jService } from "../services/Neo4jService.js";
+import { GraphDatabaseService } from "../services/GraphDatabaseService.js";
 
-const router = express.Router();
+export function createDatabaseRoutes(service: GraphDatabaseService) {
+  const router = express.Router();
 
-export function createDatabaseRoutes(neo4jService: Neo4jService) {
   // Lister toutes les databases
   router.get("/", async (req: Request, res: Response) => {
     try {
-      const databases = await neo4jService.listDatabases();
+      const databases = await service.listDatabases();
       res.json(databases);
     } catch (error: any) {
       console.error("Error listing databases:", error);
@@ -31,7 +31,7 @@ export function createDatabaseRoutes(neo4jService: Neo4jService) {
         });
       }
 
-      await neo4jService.createDatabase(name);
+      await service.createDatabase(name);
       res.json({ message: `Database ${name} created successfully`, name });
     } catch (error: any) {
       console.error("Error creating database:", error);
@@ -44,7 +44,7 @@ export function createDatabaseRoutes(neo4jService: Neo4jService) {
     try {
       const { name } = req.params;
 
-      await neo4jService.deleteDatabase(name);
+      await service.deleteDatabase(name);
       res.json({ message: `Database ${name} deleted successfully` });
     } catch (error: any) {
       console.error("Error deleting database:", error);
@@ -56,7 +56,7 @@ export function createDatabaseRoutes(neo4jService: Neo4jService) {
   router.get("/:name/stats", async (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      const stats = await neo4jService.getDatabaseStats(name);
+      const stats = await service.getDatabaseStats(name);
       res.json(stats);
     } catch (error: any) {
       console.error("Error getting database stats:", error);

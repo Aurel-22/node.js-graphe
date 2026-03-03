@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { GraphList } from './components/GraphList';
 import { GraphViewer } from './components/GraphViewer';
 import SigmaGraphViewer from './components/SigmaGraphViewer';
@@ -8,13 +8,18 @@ import CytoscapeGraphViewer from './components/CytoscapeGraphViewer';
 import VisNetworkViewer from './components/VisNetworkViewer';
 import ForceGraph3DViewer from './components/ForceGraph3DViewer';
 import ImpactAnalysis from './components/ImpactAnalysis';
+import QueryPanel from './components/QueryPanel';
 import { OptimPanel } from './components/OptimPanel';
-import { graphApi, databaseApi, Database } from './services/api';
+import ExportPanel from './components/ExportPanel';
+import GraphFormModal from './components/GraphFormModal';
+import { graphApi, databaseApi, engineApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
+import { useTheme } from './hooks/useTheme';
+import { useWebSocket, WsMessage } from './hooks/useWebSocket';
 import './App.css';
 
-type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact';
+type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact' | 'query';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -28,12 +33,35 @@ function App() {
   const [viewerType, setViewerType] = useState<ViewerType>('force-graph');
   const [databases, setDatabases] = useState<Database[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<string>('neo4j');
+  const [availableEngines, setAvailableEngines] = useState<string[]>([]);
+  const [selectedEngine, setSelectedEngine] = useState<string>('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // Charger la liste des databases et graphes au démarrage
-  useEffect(() => {
-    loadDatabases();
-    loadGraphs();
+  // ── Theme toggle ──
+  const { theme, toggleTheme } = useTheme();
+
+  // ── WebSocket — rafraîchir la liste quand un graphe est créé/supprimé ──
+  const handleWsMessage = useCallback((msg: WsMessage) => {
+    if (msg.type === 'graph:created' || msg.type === 'graph:deleted') {
+      // Recharger la liste si le message concerne la même engine/database
+      loadGraphs();
+    }
   }, []);
+  useWebSocket(handleWsMessage);
+
+  // Charger les engines disponibles au démarrage
+  useEffect(() => {
+    loadEngines();
+  }, []);
+
+  // Recharger databases quand l'engine change, puis les graphes se rechargeront
+  // via l'effet [selectedDatabase] une fois la DB par défaut sélectionnée
+  useEffect(() => {
+    if (selectedEngine) {
+      setSelectedDatabase('');  // reset pour forcer le rechargement même si même nom de DB
+      loadDatabases();
+    }
+  }, [selectedEngine]);
 
   // Recharger les graphes quand la database change
   useEffect(() => {
@@ -42,16 +70,36 @@ function App() {
     }
   }, [selectedDatabase]);
 
+  const loadEngines = async () => {
+    try {
+      const info = await engineApi.getEngines();
+      setAvailableEngines(info.available);
+      setSelectedEngine(info.default);
+    } catch (err) {
+      console.error('Failed to load engines:', err);
+      setError('Failed to connect to backend. Make sure the server is running on http://127.0.0.1:8080');
+    }
+  };
+
   const loadDatabases = async () => {
     try {
-      const data = await databaseApi.listDatabases();
+      const data = await databaseApi.listDatabases(selectedEngine as any);
       // Filtrer uniquement les databases online
       const onlineDatabases = data.filter(db => db.status === 'online');
       setDatabases(onlineDatabases);
+      // Sélectionner la database par défaut de ce moteur
+      const defaultDb = onlineDatabases.find(db => db.default) || onlineDatabases[0];
+      if (defaultDb) {
+        setSelectedDatabase(defaultDb.name);
+      } else {
+        // Pas de DB trouvée, utiliser un défaut raisonnable pour déclencher loadGraphs
+        setSelectedDatabase(selectedEngine === 'mssql' ? 'graph_db' : 'neo4j');
+      }
     } catch (err) {
       console.error('Failed to load databases:', err);
-      // En cas d'erreur, utiliser neo4j par défaut
-      setDatabases([{ name: 'neo4j', default: true, status: 'online' }]);
+      // En cas d'erreur, utiliser une DB par défaut pour que les graphes se chargent quand même
+      setDatabases([]);
+      setSelectedDatabase(selectedEngine === 'mssql' ? 'graph_db' : 'neo4j');
     }
   };
 
@@ -59,13 +107,17 @@ function App() {
     try {
       setLoading(true);
       setError(null);
-      const data = await graphApi.listGraphs(selectedDatabase);
+      const data = await graphApi.listGraphs(selectedDatabase, selectedEngine as any);
       setGraphs(data);
       
       // Sélectionner automatiquement le premier graphe (example)
       if (data.length > 0) {
         const exampleGraph = data.find(g => g.id === 'example') || data[0];
         handleSelectGraph(exampleGraph.id);
+      } else {
+        setSelectedGraphId(null);
+        setGraphData(null);
+        setRawGraphData(null);
       }
     } catch (err) {
       console.error('Failed to load graphs:', err);
@@ -84,7 +136,7 @@ function App() {
       const selectedGraph = graphs.find(g => g.id === id);
       setSelectedGraphTitle(selectedGraph?.title || '');
       
-      const result = await graphApi.getGraph(id, selectedDatabase);
+      const result = await graphApi.getGraph(id, selectedDatabase, { engine: selectedEngine as any });
       // Envoyer le résultat au panneau d'optimisations
       (window as any).__optimSetLastLoad?.(result);
       setRawGraphData(result.data);
@@ -100,11 +152,45 @@ function App() {
     }
   };
 
+  const handleDeleteGraph = async (id: string, _title: string) => {
+    try {
+      await graphApi.deleteGraph(id, selectedDatabase, selectedEngine as any);
+      // Si le graphe supprimé est celui sélectionné, déselectionner
+      if (selectedGraphId === id) {
+        setSelectedGraphId(null);
+        setGraphData(null);
+        setRawGraphData(null);
+      }
+      await loadGraphs();
+    } catch (err) {
+      console.error('Failed to delete graph:', err);
+      setError('Échec de la suppression du graphe');
+    }
+  };
+
+  const handleGraphCreated = async () => {
+    await loadGraphs();
+  };
+
   return (
     <div className="app">
       <header className="app-header">
         <h1>version demo</h1>
         <div className="header-center">
+          <div className="engine-selector">
+            <label htmlFor="engine-select">Engine:</label>
+            <select
+              id="engine-select"
+              value={selectedEngine}
+              onChange={(e) => setSelectedEngine(e.target.value)}
+            >
+              {availableEngines.map((eng) => (
+                <option key={eng} value={eng}>
+                  {eng}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="database-selector">
             <label htmlFor="database-select">Database:</label>
             <select
@@ -168,9 +254,18 @@ function App() {
             >
               Analyse d'impact
             </button>
+            <button
+              className={viewerType === 'query' ? 'active' : ''}
+              onClick={() => setViewerType('query')}
+            >
+              SQL / Cypher
+            </button>
           </div>
         </div>
         <div className="header-info">
+          <button className="theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <span className="status">
             {error ? ' Disconnected' : ' Connected'}
           </span>
@@ -191,6 +286,8 @@ function App() {
           selectedGraphId={selectedGraphId}
           onSelectGraph={handleSelectGraph}
           loading={loading}
+          onCreateGraph={() => setShowCreateModal(true)}
+          onDeleteGraph={handleDeleteGraph}
         />
         {viewerType === 'force-graph' ? (
           <GraphViewer
@@ -200,6 +297,7 @@ function App() {
           />
         ) : viewerType === '3d' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -211,6 +309,7 @@ function App() {
           </div>
         ) : viewerType === 'sigma' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -222,6 +321,7 @@ function App() {
           </div>
         ) : viewerType === 'd3' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -233,6 +333,7 @@ function App() {
           </div>
         ) : viewerType === 'cytoscape' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -244,6 +345,7 @@ function App() {
           </div>
         ) : viewerType === 'vis-network' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -255,14 +357,28 @@ function App() {
           </div>
         ) : viewerType === 'impact' ? (
           <div className="graph-viewer-container">
+            <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} />
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <ImpactAnalysis data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <ImpactAnalysis
+                data={rawGraphData}
+                graphId={selectedGraphId || undefined}
+                database={selectedDatabase || undefined}
+                engine={selectedEngine || undefined}
+              />
             )}
+          </div>
+        ) : viewerType === 'query' ? (
+          <div className="graph-viewer-container">
+            <QueryPanel
+              graphId={selectedGraphId || undefined}
+              database={selectedDatabase || undefined}
+              engine={selectedEngine || undefined}
+            />
           </div>
         ) : (
           <div className="graph-viewer-container">
@@ -282,6 +398,15 @@ function App() {
       <OptimPanel
         currentGraphId={selectedGraphId ?? undefined}
         currentDatabase={selectedDatabase}
+      />
+
+      {/* Modal de création de graphe */}
+      <GraphFormModal
+        open={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onCreated={handleGraphCreated}
+        database={selectedDatabase}
+        engine={selectedEngine}
       />
     </div>
   );

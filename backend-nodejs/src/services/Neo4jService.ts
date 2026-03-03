@@ -7,23 +7,38 @@ import {
   GraphData,
   GraphStats,
   GraphSummary,
+  ImpactResult,
 } from "../models/graph.js";
+import { GraphDatabaseService } from "./GraphDatabaseService.js";
 
-export class Neo4jService {
-  private driver: Driver;
-  private defaultDatabase: string = 'neo4j';
+export class Neo4jService implements GraphDatabaseService {
+  readonly engineName: string = "neo4j";
+  protected driver: Driver;
+  protected defaultDatabase: string = 'neo4j';
   // In-memory cache (TTL 5 minutes par défaut)
-  private graphCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+  protected graphCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
   // Statistiques de cache pour le monitoring
-  private cacheStats = { hits: 0, misses: 0, bypasses: 0 };
+  protected cacheStats = { hits: 0, misses: 0, bypasses: 0 };
 
   constructor(uri: string, user: string, password: string) {
-    this.driver = neo4j.driver(uri, neo4j.auth.basic(user, password));
+    this.driver = neo4j.driver(uri, neo4j.auth.basic(user, password), {
+      connectionAcquisitionTimeout: 10000,  // 10 secondes max pour obtenir une connexion
+      connectionTimeout: 10000,             // 10 secondes max pour établir la connexion TCP
+      maxConnectionPoolSize: 20,
+    });
+  }
+
+  /** Convertit une valeur entière Neo4j (driver v5) ou un nombre natif (driver v4/Memgraph) en number JS */
+  protected toNum(v: any): number {
+    if (v === null || v === undefined) return 0;
+    if (typeof v === "number") return v;
+    if (typeof v.toNumber === "function") return v.toNumber();
+    return Number(v);
   }
 
   // Créer une session avec une database spécifique
-  private getSession(database?: string): Session {
+  protected getSession(database?: string): Session {
     return this.driver.session({ 
       database: database || this.defaultDatabase 
     });
@@ -116,49 +131,48 @@ export class Neo4jService {
         }
       );
 
-      // Créer les nœuds
-      for (const node of nodes) {
+      // Créer les nœuds par batch UNWIND (500 par batch)
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < nodes.length; i += BATCH_SIZE) {
+        const batch = nodes.slice(i, i + BATCH_SIZE).map(n => ({
+          node_id: n.id,
+          label: n.label,
+          node_type: n.node_type,
+          properties: JSON.stringify(n.properties),
+        }));
         await session.run(
-          `
-          CREATE (n:GraphNode {
-            graph_id: $graphId,
-            node_id: $nodeId,
-            label: $label,
-            node_type: $nodeType,
-            properties: $properties
-          })
-          `,
-          {
-            graphId,
-            nodeId: node.id,
-            label: node.label,
-            nodeType: node.node_type,
-            properties: JSON.stringify(node.properties),
-          }
+          `UNWIND $batch AS node
+           CREATE (n:GraphNode {
+             graph_id: $graphId,
+             node_id: node.node_id,
+             label: node.label,
+             node_type: node.node_type,
+             properties: node.properties
+           })`,
+          { graphId, batch }
         );
       }
 
-      // Créer les arêtes
-      for (const edge of edges) {
+      // Créer les arêtes par batch UNWIND (500 par batch)
+      for (let i = 0; i < edges.length; i += BATCH_SIZE) {
+        const batch = edges.slice(i, i + BATCH_SIZE).map(e => ({
+          source: e.source,
+          target: e.target,
+          label: e.label || "",
+          edge_type: e.edge_type,
+          properties: JSON.stringify(e.properties),
+        }));
         await session.run(
-          `
-          MATCH (source:GraphNode {graph_id: $graphId, node_id: $sourceId})
-          MATCH (target:GraphNode {graph_id: $graphId, node_id: $targetId})
-          CREATE (source)-[r:CONNECTED_TO {
-            graph_id: $graphId,
-            label: $label,
-            edge_type: $edgeType,
-            properties: $properties
-          }]->(target)
-          `,
-          {
-            graphId,
-            sourceId: edge.source,
-            targetId: edge.target,
-            label: edge.label || "",
-            edgeType: edge.edge_type,
-            properties: JSON.stringify(edge.properties),
-          }
+          `UNWIND $batch AS edge
+           MATCH (source:GraphNode {graph_id: $graphId, node_id: edge.source})
+           MATCH (target:GraphNode {graph_id: $graphId, node_id: edge.target})
+           CREATE (source)-[:CONNECTED_TO {
+             graph_id: $graphId,
+             label: edge.label,
+             edge_type: edge.edge_type,
+             properties: edge.properties
+           }]->(target)`,
+          { graphId, batch }
         );
       }
 
@@ -358,6 +372,41 @@ export class Neo4jService {
     }
   }
 
+  /**
+   * Analyse d'impact côté serveur — propagation BFS sortante via Cypher.
+   * Neo4j/Memgraph : traversée native index-free adjacency O(k^d),
+   * nettement plus rapide que la CTE récursive MSSQL.
+   */
+  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const maxDepth = Math.min(depth, 15);
+    const session = this.getSession(database);
+    try {
+      const result = await session.run(
+        `MATCH path = (source:GraphNode {graph_id: $graphId, node_id: $nodeId})
+               -[:CONNECTED_TO*1..${maxDepth}]->
+               (n:GraphNode {graph_id: $graphId})
+         RETURN n.node_id AS nodeId, min(length(path)) AS level`,
+        { graphId, nodeId }
+      );
+
+      const impactedNodes = result.records.map((r) => ({
+        nodeId: r.get("nodeId") as string,
+        level: this.toNum(r.get("level")),
+      }));
+
+      return {
+        sourceNodeId: nodeId,
+        impactedNodes,
+        depth: maxDepth,
+        elapsed_ms: Date.now() - t0,
+        engine: this.engineName,
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
   async listGraphs(database?: string): Promise<GraphSummary[]> {
     const session = this.getSession(database);
 
@@ -374,8 +423,8 @@ export class Neo4jService {
         title: record.get("title"),
         description: record.get("description"),
         graph_type: record.get("graph_type"),
-        node_count: record.get("node_count").toNumber(),
-        edge_count: record.get("edge_count").toNumber(),
+        node_count: this.toNum(record.get("node_count")),
+        edge_count: this.toNum(record.get("edge_count")),
       }));
     } finally {
       await session.close();
@@ -411,8 +460,8 @@ export class Neo4jService {
       }
 
       const record = result.records[0];
-      const nodeCount = record.get("node_count").toNumber();
-      const edgeCount = record.get("edge_count").toNumber();
+      const nodeCount = this.toNum(record.get("node_count"));
+      const edgeCount = this.toNum(record.get("edge_count"));
 
       // Récupérer les types de nœuds
       const typesResult = await session.run(
@@ -425,7 +474,7 @@ export class Neo4jService {
 
       const nodeTypes: Record<string, number> = {};
       typesResult.records.forEach((rec) => {
-        nodeTypes[rec.get("type")] = rec.get("count").toNumber();
+        nodeTypes[rec.get("type")] = this.toNum(rec.get("count"));
       });
 
       return {
@@ -733,7 +782,13 @@ export class Neo4jService {
     const session = this.getSession('system');
 
     try {
-      const result = await session.run('SHOW DATABASES');
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('SHOW DATABASES timed out after 8s')), 8000)
+      );
+      const result = await Promise.race([
+        session.run('SHOW DATABASES', {}, { timeout: 7000 }),
+        timeout,
+      ]);
       
       return result.records.map((record) => ({
         name: record.get('name'),
@@ -796,10 +851,45 @@ export class Neo4jService {
 
       const record = result.records[0];
       return {
-        nodeCount: record.get('nodeCount').toNumber(),
-        relationshipCount: record.get('relationshipCount').toNumber(),
-        graphCount: record.get('graphCount').toNumber(),
+        nodeCount: this.toNum(record.get('nodeCount')),
+        relationshipCount: this.toNum(record.get('relationshipCount')),
+        graphCount: this.toNum(record.get('graphCount')),
       };
+    } finally {
+      await session.close();
+    }
+  }
+
+  // ===== Raw Query Execution =====
+
+  async executeRawQuery(
+    query: string,
+    database?: string,
+  ): Promise<{ rows: Record<string, any>[]; elapsed_ms: number; rowCount: number; engine: string }> {
+    const session = this.getSession(database);
+    try {
+      const t0 = Date.now();
+      const result = await session.run(query);
+      const elapsed_ms = Date.now() - t0;
+
+      const rows = result.records.map((record) => {
+        const obj: Record<string, any> = {};
+        record.keys.forEach((key) => {
+          const val = record.get(key);
+          // Convert Neo4j Integer to JS number
+          if (val && typeof val === 'object' && typeof val.toNumber === 'function') {
+            obj[key as string] = val.toNumber();
+          } else if (val && typeof val === 'object' && val.properties) {
+            // Neo4j Node — extract properties
+            obj[key as string] = { ...val.properties, _labels: val.labels };
+          } else {
+            obj[key as string] = val;
+          }
+        });
+        return obj;
+      });
+
+      return { rows, elapsed_ms, rowCount: rows.length, engine: this.engineName };
     } finally {
       await session.close();
     }

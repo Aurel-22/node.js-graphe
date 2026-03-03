@@ -11,10 +11,13 @@
  */
 
 import neo4j from 'neo4j-driver';
+import { config } from 'dotenv';
 
-const URI = 'neo4j://127.0.0.1:7687';
-const USER = 'neo4j';
-const PASSWORD = 'Aurelien22';
+config();
+
+const URI = process.env.NEO4J_URI || 'neo4j://127.0.0.1:7687';
+const USER = process.env.NEO4J_USER || 'neo4j';
+const PASSWORD = process.env.NEO4J_PASSWORD;
 
 const GRAPH_ID = 'community_50k';
 const NODE_COUNT = 50_000;

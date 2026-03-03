@@ -5,12 +5,15 @@ import { NodeCircleProgram, createNodeCompoundProgram } from 'sigma/rendering';
 import { createNodeImageProgram } from '@sigma/node-image';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { GraphData } from '../types/graph';
+import { ImpactResult, graphApi, EngineType } from '../services/api';
 import './ImpactAnalysis.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 
 interface ImpactAnalysisProps {
   data: GraphData | null;
   graphId?: string;
+  database?: string;
+  engine?: string;
 }
 
 type NodeStatus = 'healthy' | 'blocking' | 'impacted';
@@ -52,7 +55,7 @@ function getAdaptiveSizes(nodeCount: number) {
   return { nodeSize: 10, edgeSize: 2, labelThreshold: 6, edgeColor: '#666' };
 }
 
-const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
+const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database, engine }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const graphRef = useRef<Graph | null>(null);
@@ -64,6 +67,12 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
   const [selectedNodeStatus, setSelectedNodeStatus] = useState<NodeStatus>('healthy');
   const [isVeryLargeGraph, setIsVeryLargeGraph] = useState(false);
   const [renderTime, setRenderTime] = useState<number | null>(null);
+  // --- Server-side impact comparison ---
+  const [serverImpactResult, setServerImpactResult] = useState<ImpactResult | null>(null);
+  const [serverLoading, setServerLoading] = useState(false);
+  const [serverDepth, setServerDepth] = useState(5);
+  const [clientImpactCount, setClientImpactCount] = useState<number | null>(null);
+  const [clientImpactTime, setClientImpactTime] = useState<number | null>(null);
 
   const updateStats = useCallback(() => {
     const states = nodeStatesRef.current;
@@ -94,6 +103,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
     const queue: string[] = [];
     const visited = new Set<string>();
     visited.add(nodeId);
+    const bfsStart = performance.now();
 
     graph.forEachOutNeighbor(nodeId, (neighbor) => {
       if (!visited.has(neighbor)) { queue.push(neighbor); visited.add(neighbor); }
@@ -137,6 +147,10 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
     sigma.refresh();
     updateStats();
     setIsAnimating(false);
+    // Track client timing
+    setClientImpactCount(impactedCount);
+    setClientImpactTime(performance.now() - bfsStart);
+    setServerImpactResult(null); // reset server result on new blocking node
     console.info(`Impact: ${impactedCount} nodes impacted from ${nodeId}`);
   }, [updateStats]);
 
@@ -434,6 +448,23 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
     };
   }, [data, propagateBlocking, resetSingleNode, updateStats]);
 
+  /** Lance l'analyse d'impact côté serveur depuis le nœud actuellement sélectionné. */
+  const runServerImpact = useCallback(async () => {
+    if (!selectedNode || !graphId) return;
+    setServerLoading(true);
+    setServerImpactResult(null);
+    try {
+      const result = await graphApi.computeImpact(
+        graphId, selectedNode, serverDepth, database, engine as EngineType
+      );
+      setServerImpactResult(result);
+    } catch (err) {
+      console.error('Server impact analysis failed:', err);
+    } finally {
+      setServerLoading(false);
+    }
+  }, [selectedNode, graphId, serverDepth, database, engine]);
+
   const handleFitView = useCallback(() => {
     sigmaRef.current?.getCamera().animatedReset({ duration: 600 });
   }, []);
@@ -510,7 +541,54 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data }) => {
           </div>
         )}
       </div>
+      {/* Panel de comparaison client vs serveur */}
+      {selectedNode && (
+        <div className="server-impact-panel">
+          <h4 style={{ margin: '0 0 8px', fontSize: '0.9rem' }}>
+            <i className="bi bi-cloud-arrow-up"></i> Analyse serveur
+          </h4>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '0.82rem' }}>
+              Profondeur :
+              <input
+                type="number" value={serverDepth} min={1} max={15}
+                onChange={(e) => setServerDepth(Math.min(15, Math.max(1, parseInt(e.target.value) || 5)))}
+                style={{ width: 44, marginLeft: 4, padding: '1px 4px', borderRadius: 4 }}
+              />
+            </label>
+            <button
+              onClick={runServerImpact}
+              disabled={serverLoading || !graphId}
+              style={{ padding: '3px 10px', fontSize: '0.82rem', cursor: 'pointer' }}
+            >
+              {serverLoading
+                ? <><i className="bi bi-hourglass-split"></i> Analyse...</>
+                : <><i className="bi bi-server"></i> Lancer</>}
+            </button>
+          </div>
 
+          {(clientImpactCount !== null || serverImpactResult) && (
+            <div className="impact-comparison">
+              {clientImpactCount !== null && (
+                <div className="impact-row impact-row--client">
+                  <span className="impact-engine-tag">🖥 Client (graphology BFS)</span>
+                  <span><strong>{clientImpactCount}</strong> impactés</span>
+                  {clientImpactTime !== null && (
+                    <span className="impact-time-tag">{clientImpactTime.toFixed(1)} ms</span>
+                  )}
+                </div>
+              )}
+              {serverImpactResult && (
+                <div className="impact-row impact-row--server">
+                  <span className="impact-engine-tag">🗄 {serverImpactResult.engine} (dép={serverImpactResult.depth})</span>
+                  <span><strong>{serverImpactResult.impactedNodes.length}</strong> impactés</span>
+                  <span className="impact-time-tag">{serverImpactResult.elapsed_ms} ms</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div ref={containerRef} className="impact-container" />
 
       {selectedNode && (

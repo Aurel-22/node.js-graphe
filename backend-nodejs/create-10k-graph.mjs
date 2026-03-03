@@ -1,11 +1,11 @@
 /**
- * Crée un graphe de 30 000 nœuds avec une structure multi-communautés réaliste.
+ * Crée un graphe de 10 000 nœuds avec une structure multi-communautés réaliste.
  * 
  * Structure :
- * - 15 communautés de 2 000 nœuds chacune
+ * - 10 communautés de 1 000 nœuds chacune
  * - Connexions denses INTRA-communauté (chaque nœud a 3-8 voisins locaux)
  * - Ponts INTER-communautés (hubs qui relient les clusters)
- * - ~150 000 arêtes au total (~5 par nœud en moyenne)
+ * - ~50 000 arêtes au total (~5 par nœud en moyenne)
  * 
  * Utilise UNWIND pour des batch inserts rapides.
  */
@@ -19,10 +19,10 @@ const URI = process.env.NEO4J_URI || 'neo4j://127.0.0.1:7687';
 const USER = process.env.NEO4J_USER || 'neo4j';
 const PASSWORD = process.env.NEO4J_PASSWORD;
 
-const GRAPH_ID = 'community_30k';
-const NODE_COUNT = 30_000;
-const COMMUNITY_COUNT = 15;
-const NODES_PER_COMMUNITY = NODE_COUNT / COMMUNITY_COUNT; // 2000
+const GRAPH_ID = 'community_10k';
+const NODE_COUNT = 10_000;
+const COMMUNITY_COUNT = 10;
+const NODES_PER_COMMUNITY = NODE_COUNT / COMMUNITY_COUNT; // 1000
 
 const NODE_TYPES = [
   'process', 'service', 'database', 'api', 'user',
