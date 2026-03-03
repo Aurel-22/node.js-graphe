@@ -166,9 +166,9 @@ ORDER BY edge_count DESC`,
   {
     label: '🔍 Lister les graphes',
     description: 'Métadonnées de tous les graphes avec comptage',
-    query: `SELECT g.graph_id, g.title, g.graph_type,
-       (SELECT COUNT(*) FROM graph_nodes n WHERE n.graph_id = g.graph_id) AS nodes,
-       (SELECT COUNT(*) FROM graph_edges e WHERE e.graph_id = g.graph_id) AS edges
+    query: `SELECT g.id AS graph_id, g.title, g.graph_type,
+       (SELECT COUNT(*) FROM graph_nodes n WHERE n.graph_id = g.id) AS nodes,
+       (SELECT COUNT(*) FROM graph_edges e WHERE e.graph_id = g.id) AS edges
 FROM graphs g
 ORDER BY nodes DESC`,
     engine: 'mssql',
@@ -204,8 +204,8 @@ WHERE e.source_id = 'C0_N0'`,
   {
     label: '🎯 Impact CTE depth=3',
     description: 'Traversée CTE récursive depuis C0_N0 (profondeur 3)',
-    query: `-- Remplacer GRAPH_ID_HERE par l'ID réel du graphe
-DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs);
+    query: `-- Utilise le plus grand graphe (cliquer sur un chip ci-dessus pour en choisir un)
+DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
@@ -281,7 +281,7 @@ ORDER BY total_kb DESC`,
   {
     label: '🔴 CTE depth=5',
     description: '🐢 MSSQL: ~300-637ms | ⚡ Neo4j: ~30ms — CTE récursive profondeur 5',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs ORDER BY (SELECT NULL));
+    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
@@ -302,7 +302,7 @@ OPTION (MAXRECURSION 200)`,
   {
     label: '🔴 CTE depth=8',
     description: '💀 MSSQL: ~4-18 secondes | ⚡ Neo4j: ~7-97ms — explosion exponentielle',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs ORDER BY (SELECT NULL));
+    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
@@ -323,7 +323,7 @@ OPTION (MAXRECURSION 200)`,
   {
     label: '🧭 BFS nœuds/niveau',
     description: 'Nœuds impactés par niveau de profondeur — croissance exponentielle visible',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs ORDER BY (SELECT NULL));
+    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
@@ -344,7 +344,7 @@ OPTION (MAXRECURSION 200)`,
   {
     label: '🔀 Explosion chemins CTE',
     description: 'Nombre de lignes brutes vs nœuds uniques — montre pourquoi UNION ALL explose',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs ORDER BY (SELECT NULL));
+    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 
 WITH AllPaths AS (
   SELECT node_id, 0 AS lvl
@@ -370,7 +370,7 @@ OPTION (MAXRECURSION 200)`,
   {
     label: '💡 BFS optimisé',
     description: 'CTE avec déduplication par niveau — 10-50× plus rapide que la CTE naïve',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 graph_id FROM graphs ORDER BY (SELECT NULL));
+    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
 DECLARE @maxDepth INT = 8;
 
 CREATE TABLE #frontier (node_id NVARCHAR(255) PRIMARY KEY);
@@ -432,6 +432,13 @@ export default function QueryPanel({ graphId, database, engine }: QueryPanelProp
     }
   }, [query]);
 
+  /** Adapt a Cypher query for Memgraph (no length() function) */
+  const adaptForMemgraph = useCallback((q: string) => {
+    return q
+      .replace(/\blength\(path\)/g, 'size(relationships(path))')
+      .replace(/\blength\(([a-zA-Z_][a-zA-Z0-9_]*)\)/g, 'size(relationships($1))');
+  }, []);
+
   const executeQuery = useCallback(async () => {
     if (!query.trim()) return;
     setRunning(true);
@@ -451,7 +458,9 @@ export default function QueryPanel({ graphId, database, engine }: QueryPanelProp
 
         const promises = engines.map(async (eng) => {
           const t0 = performance.now();
-          const r = await graphApi.executeQuery(query, database, eng);
+          // Memgraph doesn't support length(path) — auto-substitute on the fly
+          const q = eng === 'memgraph' ? adaptForMemgraph(query) : query;
+          const r = await graphApi.executeQuery(q, database, eng);
           r.totalMs = Math.round(performance.now() - t0);
           return r;
         });
@@ -459,7 +468,8 @@ export default function QueryPanel({ graphId, database, engine }: QueryPanelProp
         setResults(allResults);
       } else {
         const t0 = performance.now();
-        const result = await graphApi.executeQuery(query, database, currentEngine);
+        const q = currentEngine === 'memgraph' ? adaptForMemgraph(query) : query;
+        const result = await graphApi.executeQuery(q, database, currentEngine);
         result.totalMs = Math.round(performance.now() - t0);
         setResults([result]);
       }
@@ -474,7 +484,7 @@ export default function QueryPanel({ graphId, database, engine }: QueryPanelProp
     } finally {
       setRunning(false);
     }
-  }, [query, database, currentEngine, runBoth, isCypher]);
+  }, [query, database, currentEngine, runBoth, isCypher, adaptForMemgraph]);
 
   const loadExample = useCallback((example: QueryExample) => {
     let q = example.query;
@@ -490,8 +500,12 @@ export default function QueryPanel({ graphId, database, engine }: QueryPanelProp
         );
       }
     }
+    // Memgraph doesn't support length(path) — auto-substitute
+    if (currentEngine === 'memgraph') {
+      q = adaptForMemgraph(q);
+    }
     setQuery(q);
-  }, [activeGraphId]);
+  }, [activeGraphId, currentEngine, adaptForMemgraph]);
 
   /** Replace all graph IDs in the current query with the new one */
   const swapGraphId = useCallback((newId: string) => {

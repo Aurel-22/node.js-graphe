@@ -1,9 +1,11 @@
 import express from "express";
+import http from "http";
 import cors from "cors";
 import compression from "compression";
 import { config } from "dotenv";
 import pino from "pino";
 import pinoHttp from "pino-http";
+import { WebSocketServer, WebSocket } from "ws";
 import { Neo4jService } from "./services/Neo4jService.js";
 import { ArangoService } from "./services/ArangoService.js";
 import { MemgraphService } from "./services/MemgraphService.js";
@@ -124,7 +126,7 @@ function resolveEngine(req: express.Request, _res: express.Response, next: expre
 // Les routes utilisent ?engine=neo4j ou ?engine=arangodb
 app.use("/api", resolveEngine, (req, res, next) => {
   const service: GraphDatabaseService = (req as any).dbService;
-  graphRoutes(service)(req, res, next);
+  graphRoutes(service, broadcast)(req, res, next);
 });
 
 app.use("/api/databases", resolveEngine, (req, res, next) => {
@@ -193,7 +195,29 @@ app.use((err: any, req: any, res: any, next: any) => {
 const PORT = parseInt(process.env.SERVER_PORT || "8080");
 const HOST = process.env.SERVER_HOST || "127.0.0.1";
 
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+
+// ===== WebSocket server =====
+const wss = new WebSocketServer({ server, path: "/ws" });
+
+wss.on("connection", (ws) => {
+  logger.info("WebSocket client connected");
+  ws.send(JSON.stringify({ type: "connected", engines: Object.keys(engines) }));
+  ws.on("close", () => logger.info("WebSocket client disconnected"));
+});
+
+/** Broadcast a message to all connected WebSocket clients. */
+function broadcast(message: Record<string, any>) {
+  const data = JSON.stringify(message);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+server.listen(PORT, HOST, () => {
   logger.info(`Server running at http://${HOST}:${PORT}`);
+  logger.info(`WebSocket available at ws://${HOST}:${PORT}/ws`);
   logger.info(`Available engines: ${Object.keys(engines).join(", ")} (default: ${defaultEngine})`);
 });

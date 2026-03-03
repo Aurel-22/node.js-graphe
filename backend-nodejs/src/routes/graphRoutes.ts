@@ -3,7 +3,7 @@ import { GraphDatabaseService } from "../services/GraphDatabaseService.js";
 import { MermaidParser } from "../services/MermaidParser.js";
 import { CreateGraphRequest } from "../models/graph.js";
 
-export function graphRoutes(service: GraphDatabaseService) {
+export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Record<string, any>) => void) {
   const router = Router();
 
   // List all graphs
@@ -166,6 +166,15 @@ export function graphRoutes(service: GraphDatabaseService) {
         database,
       );
 
+      // Broadcast WebSocket event
+      broadcast?.({
+        type: "graph:created",
+        graphId,
+        title: body.title,
+        engine: service.engineName,
+        database,
+      });
+
       res.status(201).json(graph);
     } catch (error) {
       if (error instanceof Error && error.message.includes("No nodes found")) {
@@ -181,6 +190,15 @@ export function graphRoutes(service: GraphDatabaseService) {
       const database = req.query.database as string | undefined;
       await service.deleteGraph(req.params.id, database);
       service.clearCache(req.params.id, database);
+
+      // Broadcast WebSocket event
+      broadcast?.({
+        type: "graph:deleted",
+        graphId: req.params.id,
+        engine: service.engineName,
+        database,
+      });
+
       res.status(204).send();
     } catch (error) {
       next(error);

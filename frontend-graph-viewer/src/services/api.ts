@@ -68,7 +68,37 @@ export interface EngineInfo {
   default: string;
 }
 
+export interface CreateGraphRequest {
+  title: string;
+  description: string;
+  graph_type: string;
+  mermaid_code?: string;
+  nodes?: Array<{ id: string; label: string; node_type: string; properties?: Record<string, any> }>;
+  edges?: Array<{ source: string; target: string; label?: string; edge_type: string; properties?: Record<string, any> }>;
+}
+
 export const graphApi = {
+  // Créer un nouveau graphe
+  createGraph: async (
+    request: CreateGraphRequest,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<GraphSummary> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.post<GraphSummary>('/graphs', request, { params });
+    return response.data;
+  },
+
+  // Supprimer un graphe
+  deleteGraph: async (id: string, database?: string, engine?: EngineType): Promise<void> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    await api.delete(`/graphs/${id}`, { params });
+  },
+
   // Lister tous les graphes
   listGraphs: async (database?: string, engine?: EngineType): Promise<GraphSummary[]> => {
     const params: Record<string, string> = {};

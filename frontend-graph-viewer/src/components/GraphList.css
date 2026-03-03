@@ -2,16 +2,46 @@
   width: 100%;
   max-width: 400px;
   padding: 20px;
-  background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
-  border-right: 1px solid rgba(102, 126, 234, 0.2);
-  color: white;
+  background: linear-gradient(135deg, var(--bg-sidebar) 0%, var(--bg-sidebar-end) 100%);
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-primary);
   overflow-y: auto;
 }
 
+.graph-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 .graph-list h2 {
-  margin: 0 0 20px 0;
+  margin: 0;
   font-size: 24px;
   font-weight: 600;
+}
+
+.btn-add-graph {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-accent);
+  border-radius: 8px;
+  background: var(--bg-toggle);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 700;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.btn-add-graph:hover {
+  background: var(--accent);
+  color: white;
+  transform: scale(1.1);
 }
 
 .graph-items {
@@ -21,23 +51,24 @@
 }
 
 .graph-item {
-  background: rgba(102, 126, 234, 0.08);
-  border: 1px solid rgba(102, 126, 234, 0.2);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
   padding: 15px;
   cursor: pointer;
   transition: all 0.3s ease;
+  position: relative;
 }
 
 .graph-item:hover {
-  background: rgba(102, 126, 234, 0.12);
-  border-color: rgba(102, 126, 234, 0.4);
+  background: var(--bg-card-hover);
+  border-color: var(--border-accent);
   transform: translateX(5px);
 }
 
 .graph-item.selected {
-  background: rgba(102, 126, 234, 0.2);
-  border-color: #667eea;
+  background: var(--bg-card-selected);
+  border-color: var(--accent);
   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
 }
 
@@ -45,6 +76,7 @@
   margin: 0 0 8px 0;
   font-size: 18px;
   font-weight: 600;
+  padding-right: 28px;
 }
 
 .graph-item .description {
@@ -71,11 +103,39 @@
 }
 
 .graph-item .badge {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--badge-bg);
   padding: 4px 12px;
   border-radius: 12px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.btn-delete-graph {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.graph-item:hover .btn-delete-graph {
+  opacity: 1;
+}
+
+.btn-delete-graph:hover {
+  background: rgba(244, 67, 54, 0.2);
+  color: #f44336;
 }
 
 .loading,
