@@ -9,6 +9,7 @@ interface GraphListProps {
   loading: boolean;
   onCreateGraph?: () => void;
   onDeleteGraph?: (id: string, title: string) => void;
+  onDeduplicateGraphs?: () => void;
 }
 
 export const GraphList: React.FC<GraphListProps> = ({
@@ -18,6 +19,7 @@ export const GraphList: React.FC<GraphListProps> = ({
   loading,
   onCreateGraph,
   onDeleteGraph,
+  onDeduplicateGraphs,
 }) => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -63,6 +65,15 @@ export const GraphList: React.FC<GraphListProps> = ({
     <div className="graph-list">
       <div className="graph-list-header">
         <h2>Available Graphs</h2>
+        {onDeduplicateGraphs && (
+          <button
+            className="btn-deduplicate-graphs"
+            onClick={onDeduplicateGraphs}
+            title="Supprimer les graphes en double (même titre)"
+          >
+            ⧉
+          </button>
+        )}
         {onCreateGraph && (
           <button className="btn-add-graph" onClick={onCreateGraph} title="Nouveau graphe">+</button>
         )}

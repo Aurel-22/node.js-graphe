@@ -1,0 +1,49 @@
+-- ============================================================================
+-- 09_edge_vs_node_ratios.sql — Ratio edges/nœuds pour différents filtres
+-- Compare la densité de différents sous-ensembles
+-- ============================================================================
+
+-- A. Par IS_SERVICE (services vs non-services)
+SELECT
+  'Services uniquement' AS filtre,
+  COUNT(DISTINCT a.ASSET_ID)  AS nb_ci,
+  (SELECT COUNT(*) FROM [DATA_VALEO].[50004].CONFIGURATION_ITEM_LINK l
+   WHERE EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a1 WHERE a1.ASSET_ID = l.PARENT_CI_ID AND a1.IS_CI = 1 AND a1.IS_SERVICE = 1)
+   AND   EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a2 WHERE a2.ASSET_ID = l.CHILD_CI_ID AND a2.IS_CI = 1 AND a2.IS_SERVICE = 1)
+  ) AS nb_edges
+FROM [DATA_VALEO].[50004].AM_ASSET a
+WHERE a.IS_CI = 1 AND a.IS_SERVICE = 1
+
+UNION ALL
+
+SELECT
+  'Non-services uniquement',
+  COUNT(DISTINCT a.ASSET_ID),
+  (SELECT COUNT(*) FROM [DATA_VALEO].[50004].CONFIGURATION_ITEM_LINK l
+   WHERE EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a1 WHERE a1.ASSET_ID = l.PARENT_CI_ID AND a1.IS_CI = 1 AND a1.IS_SERVICE = 0)
+   AND   EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a2 WHERE a2.ASSET_ID = l.CHILD_CI_ID AND a2.IS_CI = 1 AND a2.IS_SERVICE = 0)
+  )
+FROM [DATA_VALEO].[50004].AM_ASSET a
+WHERE a.IS_CI = 1 AND a.IS_SERVICE = 0
+
+UNION ALL
+
+SELECT
+  'Mixte (service <-> non-service)',
+  (SELECT COUNT(*) FROM [DATA_VALEO].[50004].AM_ASSET WHERE IS_CI = 1),
+  (SELECT COUNT(*) FROM [DATA_VALEO].[50004].CONFIGURATION_ITEM_LINK l
+   WHERE EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a1 WHERE a1.ASSET_ID = l.PARENT_CI_ID AND a1.IS_CI = 1)
+   AND   EXISTS (SELECT 1 FROM [DATA_VALEO].[50004].AM_ASSET a2 WHERE a2.ASSET_ID = l.CHILD_CI_ID AND a2.IS_CI = 1)
+  );
+
+
+-- B. Par statut CI (CMDB_CI_STATUS)
+SELECT TOP 10
+  cs.CI_STATUS_FR                  AS statut,
+  COUNT(DISTINCT a.ASSET_ID)       AS nb_ci
+FROM [DATA_VALEO].[50004].AM_ASSET a
+LEFT JOIN [DATA_VALEO].[50004].CMDB_CI_STATUS cs
+  ON a.CI_STATUS_ID = cs.CI_STATUS_ID
+WHERE a.IS_CI = 1
+GROUP BY cs.CI_STATUS_FR
+ORDER BY nb_ci DESC;

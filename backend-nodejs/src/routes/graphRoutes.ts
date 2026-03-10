@@ -113,6 +113,88 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
     }
   });
 
+  // Benchmark: compare SQL vs Cache vs JSON timing
+  // GET /graphs/:id/benchmark — runs SQL + cache queries and returns timings
+  router.get("/graphs/:id/benchmark", async (req, res, next) => {
+    try {
+      const database = req.query.database as string | undefined;
+      const iterations = Math.min(parseInt(req.query.iterations as string) || 3, 10);
+
+      // 1. Warm up the cache first
+      await service.getGraph(req.params.id, database, false);
+
+      // 2. Measure SQL direct (bypass cache) — multiple iterations
+      const sqlTimes: number[] = [];
+      let graphData: any = null;
+      for (let i = 0; i < iterations; i++) {
+        const t0 = performance.now();
+        graphData = await service.getGraph(req.params.id, database, true); // nocache
+        sqlTimes.push(Math.round((performance.now() - t0) * 100) / 100);
+      }
+
+      // 3. Measure Cache HIT — multiple iterations
+      const cacheTimes: number[] = [];
+      for (let i = 0; i < iterations; i++) {
+        const t0 = performance.now();
+        await service.getGraph(req.params.id, database, false); // with cache
+        cacheTimes.push(Math.round((performance.now() - t0) * 100) / 100);
+      }
+
+      // 4. Measure JSON serialization/deserialization
+      const jsonStr = JSON.stringify(graphData);
+      const jsonTimes: number[] = [];
+      for (let i = 0; i < iterations; i++) {
+        const t0 = performance.now();
+        JSON.parse(jsonStr);
+        jsonTimes.push(Math.round((performance.now() - t0) * 100) / 100);
+      }
+
+      const avg = (arr: number[]) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 100) / 100;
+      const min = (arr: number[]) => Math.min(...arr);
+      const max = (arr: number[]) => Math.max(...arr);
+
+      const jsonSizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+
+      res.json({
+        graphId: req.params.id,
+        engine: service.engineName,
+        database: database || 'default',
+        iterations,
+        nodeCount: graphData.nodes?.length || 0,
+        edgeCount: graphData.edges?.length || 0,
+        jsonSizeBytes,
+        jsonSizeKB: Math.round(jsonSizeBytes / 1024 * 10) / 10,
+        sql: {
+          times: sqlTimes,
+          avg: avg(sqlTimes),
+          min: min(sqlTimes),
+          max: max(sqlTimes),
+          label: 'Requête SQL directe (bypass cache)',
+        },
+        cache: {
+          times: cacheTimes,
+          avg: avg(cacheTimes),
+          min: min(cacheTimes),
+          max: max(cacheTimes),
+          label: 'Cache NodeCache (mémoire serveur)',
+        },
+        json: {
+          times: jsonTimes,
+          avg: avg(jsonTimes),
+          min: min(jsonTimes),
+          max: max(jsonTimes),
+          label: 'JSON parse (désérialisation)',
+        },
+        speedup: {
+          cacheVsSql: Math.round(avg(sqlTimes) / Math.max(avg(cacheTimes), 0.01) * 10) / 10,
+          jsonVsSql: Math.round(avg(sqlTimes) / Math.max(avg(jsonTimes), 0.01) * 10) / 10,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Create a new graph from Mermaid code
   router.post("/graphs", async (req, res, next) => {
     try {

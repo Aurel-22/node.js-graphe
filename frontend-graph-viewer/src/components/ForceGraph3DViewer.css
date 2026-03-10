@@ -3,7 +3,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #0a0e14;
+  background: var(--graph-bg, #0a0e14);
   position: relative;
   width: 100%;
   height: 100%;
@@ -11,12 +11,12 @@
 
 .force-graph-3d-viewer .graph-header {
   padding: 14px 20px;
-  background: linear-gradient(135deg, #0d1b3e 0%, #16213e 100%);
-  border-bottom: 1px solid rgba(102, 126, 234, 0.25);
+  background: linear-gradient(135deg, var(--graph-bg, #0d1b3e) 0%, var(--graph-bg-end, #16213e) 100%);
+  border-bottom: 1px solid var(--border-accent, rgba(102, 126, 234, 0.25));
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: white;
+  color: var(--text-primary, white);
   z-index: 20;
 }
 

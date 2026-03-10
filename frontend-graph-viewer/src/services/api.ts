@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { GraphData, GraphSummary, GraphStats } from '../types/graph';
 
-const API_BASE_URL = 'http://127.0.0.1:8080/api';
+const API_BASE_URL = 'http://172.23.0.162:8080/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -61,6 +61,76 @@ export interface RawQueryResult {
   error?: string;
   /** Temps total round-trip (réseau + DB + sérialisation), mesuré côté client. */
   totalMs?: number;
+}
+
+/** Résultat du benchmark SQL vs Cache vs JSON. */
+export interface BenchmarkTimings {
+  times: number[];
+  avg: number;
+  min: number;
+  max: number;
+  label: string;
+}
+
+export interface BenchmarkResult {
+  graphId: string;
+  engine: string;
+  database: string;
+  iterations: number;
+  nodeCount: number;
+  edgeCount: number;
+  jsonSizeBytes: number;
+  jsonSizeKB: number;
+  sql: BenchmarkTimings;
+  cache: BenchmarkTimings;
+  json: BenchmarkTimings;
+  speedup: {
+    cacheVsSql: number;
+    jsonVsSql: number;
+  };
+}
+
+// ─── Algorithm result types ────────────────────────────────
+
+export interface TraversalResult {
+  visitedNodes: Array<{ nodeId: string; level: number; parent: string | null }>;
+  visitedCount: number;
+  maxDepth: number;
+}
+
+export interface ShortestPathResult {
+  path: string[];
+  cost: number;
+  exploredCount: number;
+}
+
+export interface CentralityResultData {
+  scores: Array<{ nodeId: string; score: number }>;
+  stats: { min: number; max: number; avg: number; median: number };
+}
+
+export interface CommunityResultData {
+  communities: Record<string, string[]>;
+  communityCount: number;
+  modularity: number | null;
+}
+
+export interface TopologicalSortResult {
+  order: string[];
+  hasCycle: boolean;
+}
+
+export interface AlgorithmResult {
+  algorithm: string;
+  elapsed_ms: number;
+  nodeCount: number;
+  edgeCount: number;
+  result:
+    | { type: 'traversal'; data: TraversalResult }
+    | { type: 'shortestPath'; data: ShortestPathResult }
+    | { type: 'centrality'; data: CentralityResultData }
+    | { type: 'community'; data: CommunityResultData }
+    | { type: 'topologicalSort'; data: TopologicalSortResult };
 }
 
 export interface EngineInfo {
@@ -220,6 +290,35 @@ export const graphApi = {
       };
     }
   },
+
+  // Benchmark SQL vs Cache vs JSON
+  benchmarkGraph: async (
+    graphId: string,
+    database?: string,
+    engine?: EngineType,
+    iterations: number = 3,
+  ): Promise<BenchmarkResult> => {
+    const params: Record<string, string> = { iterations: iterations.toString() };
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.get<BenchmarkResult>(`/graphs/${graphId}/benchmark`, { params });
+    return response.data;
+  },
+};
+
+export const cmdbApi = {
+  /** Importer les CIs EasyVista comme graphe */
+  importCmdb: async (
+    limit: number = 800,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<any> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.post('/cmdb/import', { limit }, { params });
+    return response.data;
+  },
 };
 
 export const databaseApi = {
@@ -286,6 +385,48 @@ export const engineApi = {
   // Lister les moteurs disponibles
   getEngines: async (): Promise<EngineInfo> => {
     const response = await api.get<EngineInfo>('/engines');
+    return response.data;
+  },
+};
+
+export const algorithmApi = {
+  /** Lister les algorithmes disponibles */
+  listAlgorithms: async (
+    graphId: string,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<{ algorithms: string[] }> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.get<{ algorithms: string[] }>(`/graphs/${graphId}/algorithms`, { params });
+    return response.data;
+  },
+
+  /** Exécuter un algorithme sur un graphe */
+  runAlgorithm: async (
+    graphId: string,
+    algorithm: string,
+    options?: {
+      sourceNode?: string;
+      targetNode?: string;
+      depth?: number;
+      iterations?: number;
+      damping?: number;
+      threshold?: number;
+      sampleSize?: number;
+    },
+    database?: string,
+    engine?: EngineType,
+  ): Promise<AlgorithmResult> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.post<AlgorithmResult>(
+      `/graphs/${graphId}/algorithms`,
+      { algorithm, ...options },
+      { params },
+    );
     return response.data;
   },
 };

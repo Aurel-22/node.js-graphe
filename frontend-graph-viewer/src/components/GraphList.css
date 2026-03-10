@@ -44,6 +44,28 @@
   transform: scale(1.1);
 }
 
+.btn-deduplicate-graphs {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ff980066;
+  border-radius: 8px;
+  background: rgba(255,152,0,0.1);
+  color: #ff9800;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  transition: all 0.2s;
+}
+
+.btn-deduplicate-graphs:hover {
+  background: #ff9800;
+  color: white;
+  transform: scale(1.1);
+}
+
 .graph-items {
   display: flex;
   flex-direction: column;

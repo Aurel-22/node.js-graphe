@@ -13,6 +13,8 @@ import { MssqlService } from "./services/MssqlService.js";
 import { GraphDatabaseService } from "./services/GraphDatabaseService.js";
 import { graphRoutes } from "./routes/graphRoutes.js";
 import { createDatabaseRoutes } from "./routes/databaseRoutes.js";
+import { cmdbRoutes } from "./routes/cmdbRoutes.js";
+import { algorithmRoutes } from "./routes/algorithmRoutes.js";
 
 config(); // Charge .env
 
@@ -133,6 +135,28 @@ app.use("/api/databases", resolveEngine, (req, res, next) => {
   const service: GraphDatabaseService = (req as any).dbService;
   createDatabaseRoutes(service)(req, res, next);
 });
+
+// ===== Algorithm routes =====
+app.use("/api", resolveEngine, (req, res, next) => {
+  const service: GraphDatabaseService = (req as any).dbService;
+  algorithmRoutes(service)(req, res, next);
+});
+
+// ===== CMDB Import route =====
+if (process.env.MSSQL_HOST && engines.mssql) {
+  const mssqlService = engines.mssql as MssqlService;
+  app.use("/api/cmdb", cmdbRoutes(
+    {
+      host: process.env.MSSQL_HOST,
+      port: parseInt(process.env.MSSQL_PORT || "1433"),
+      user: process.env.MSSQL_USER || "sa",
+      password: process.env.MSSQL_PASSWORD || "",
+    },
+    mssqlService.createGraph.bind(mssqlService),
+    broadcast,
+  ));
+  logger.info("CMDB import route registered at POST /api/cmdb/import");
+}
 
 // ===== Raw query execution endpoint =====
 // POST /api/query — execute raw SQL (MSSQL), Cypher (Neo4j/Memgraph), or AQL (ArangoDB)

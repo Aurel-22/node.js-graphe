@@ -67,9 +67,9 @@
 .example-btn {
   padding: 5px 10px;
   border-radius: 6px;
-  border: 1px solid #30363d;
-  background: #161b22;
-  color: #c9d1d9;
+  border: 1px solid var(--border-accent, #30363d);
+  background: var(--bg-secondary, #161b22);
+  color: var(--text-secondary, #c9d1d9);
   font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s;
@@ -238,8 +238,8 @@
 
 .result-block {
   border-radius: 8px;
-  border: 1px solid #30363d;
-  background: #161b22;
+  border: 1px solid var(--border-accent, #30363d);
+  background: var(--bg-secondary, #161b22);
   overflow: hidden;
 }
 
@@ -345,8 +345,8 @@
 
 .comparison-summary {
   border-radius: 8px;
-  border: 1px solid #30363d;
-  background: #161b22;
+  border: 1px solid var(--border-accent, #30363d);
+  background: var(--bg-secondary, #161b22);
   padding: 14px;
 }
 

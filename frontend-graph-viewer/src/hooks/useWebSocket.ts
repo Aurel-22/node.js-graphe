@@ -24,7 +24,7 @@ export function useWebSocket(onMessage: (msg: WsMessage) => void) {
     if (!mountedRef.current) return;
 
     try {
-      const ws = new WebSocket('ws://127.0.0.1:8080/ws');
+      const ws = new WebSocket('ws://172.23.0.162:8080/ws');
       wsRef.current = ws;
 
       ws.onopen = () => {

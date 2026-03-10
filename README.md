@@ -389,4 +389,4 @@ Ce projet est sous licence MIT.
 
 ---
 
-**⭐ Si ce projet vous a aidé, n'hésitez pas à le star sur GitHub !**
+

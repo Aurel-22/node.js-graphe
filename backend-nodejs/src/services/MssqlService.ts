@@ -54,7 +54,7 @@ export class MssqlService implements GraphDatabaseService {
         idleTimeoutMillis: 30_000,
       },
       connectionTimeout: 15_000,
-      requestTimeout: 30_000,
+      requestTimeout: 600_000,
     };
   }
 

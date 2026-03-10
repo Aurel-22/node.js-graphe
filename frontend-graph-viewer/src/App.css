@@ -243,3 +243,26 @@ body {
     flex-direction: column;
   }
 }
+
+/* CMDB Import button */
+.cmdb-import-btn {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.cmdb-import-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+}
+.cmdb-import-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

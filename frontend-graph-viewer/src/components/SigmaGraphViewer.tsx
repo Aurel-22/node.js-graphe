@@ -653,14 +653,15 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
   const progressiveModeRef = useRef<boolean>(false);
   const currentDepthRef = useRef<number>(0);
   const visibleNodesRef = useRef<Set<string>>(new Set());
+  const [visibleNodesHistory, setVisibleNodesHistory] = useState<Set<string>[]>([]);
 
   // Node list for progressive mode
   const MAX_NODE_LIST = 100;
   const [nodeListFilter, setNodeListFilter] = useState('');
   const [exploredNodes, setExploredNodes] = useState<Set<string>>(new Set());
 
-  // Build a sampled node list (max 100 for large graphs)
-  const nodeList = useMemo(() => {
+  // Build a sampled node list (max 100 for large graphs, used when no filter)
+  const nodeListSample = useMemo(() => {
     if (!data || data.nodes.length === 0) return [];
     const all = data.nodes;
     if (all.length <= MAX_NODE_LIST) return all;
@@ -676,14 +677,21 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
   }, [data]);
 
   const filteredNodeList = useMemo(() => {
-    if (!nodeListFilter) return nodeList;
-    const q = nodeListFilter.toLowerCase();
-    return nodeList.filter(n =>
-      n.id.toLowerCase().includes(q) ||
-      (n.label || '').toLowerCase().includes(q) ||
-      (n.node_type || '').toLowerCase().includes(q)
-    );
-  }, [nodeList, nodeListFilter]);
+    if (!data || data.nodes.length === 0) return [];
+    // When filter is active, search ALL nodes (not just the sample)
+    if (nodeListFilter) {
+      const q = nodeListFilter.toLowerCase();
+      const matched = data.nodes.filter(n =>
+        n.id.toLowerCase().includes(q) ||
+        (n.label || '').toLowerCase().includes(q) ||
+        (n.node_type || '').toLowerCase().includes(q)
+      );
+      // Cap at 200 results to keep the list responsive
+      return matched.slice(0, 200);
+    }
+    // No filter → show the 100-node sample
+    return nodeListSample;
+  }, [data, nodeListSample, nodeListFilter]);
 
   useEffect(() => { progressiveModeRef.current = progressiveMode; }, [progressiveMode]);
   useEffect(() => { currentDepthRef.current = currentDepth; }, [currentDepth]);
@@ -871,6 +879,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
         .map(([type, { color, count }]) => ({ type, color, count }))
         .sort((a, b) => b.count - a.count)
     );
+    setVisibleNodesHistory(prev => [...prev, new Set(visibleNodesRef.current)]);
     setVisibleNodes(allVisible);
     setExploredNodes(prev => new Set([...prev, nodeId]));
     setCurrentDepth(prev => prev + 1);
@@ -1021,6 +1030,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
         .map(([type, { color, count }]) => ({ type, color, count }))
         .sort((a, b) => b.count - a.count)
     );
+    setVisibleNodesHistory(prev => [...prev, new Set(visibleNodesRef.current)]);
     setVisibleNodes(allVisible);
     setCurrentDepth(prev => prev + 1);
     sigmaRef.current?.refresh();
@@ -1127,9 +1137,46 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     setBenchmarkResult(null);
     setExploredNodes(new Set());
     setNodeListFilter('');
+    setVisibleNodesHistory([]);
     // Increment resetKey to trigger full rebuild of graph + Sigma
     setResetKey(k => k + 1);
   }, [data]);
+
+  // ─── Progressive: go back one level ───
+  const loadPrevLevel = useCallback(() => {
+    if (!graphRef.current || visibleNodesHistory.length === 0) return;
+
+    const graph = graphRef.current;
+    const prevSnapshot = visibleNodesHistory[visibleNodesHistory.length - 1];
+
+    // Remove nodes not in previous snapshot (graphology auto-drops their incident edges)
+    const toRemove: string[] = [];
+    graph.forEachNode((nId) => {
+      if (!prevSnapshot.has(nId)) toRemove.push(nId);
+    });
+    toRemove.forEach(nId => graph.dropNode(nId));
+
+    // Rebuild nodeTypes from remaining nodes
+    const typeMap = new Map<string, { color: string; count: number }>();
+    graph.forEachNode((_nId, attrs) => {
+      const nodeType = (attrs.nodeType as string) || 'default';
+      const color = (attrs.color as string) || NODE_COLORS.default;
+      const existing = typeMap.get(nodeType);
+      if (existing) existing.count++;
+      else typeMap.set(nodeType, { color, count: 1 });
+    });
+
+    setNodeTypes(
+      Array.from(typeMap.entries())
+        .map(([type, { color, count }]) => ({ type, color, count }))
+        .sort((a, b) => b.count - a.count)
+    );
+    setVisibleNodesHistory(prev => prev.slice(0, -1));
+    setVisibleNodes(new Set(prevSnapshot));
+    setCurrentDepth(prev => Math.max(0, prev - 1));
+    setLevelTimings(prev => prev.slice(0, -1));
+    sigmaRef.current?.refresh();
+  }, [visibleNodesHistory]);
 
   // ─── Main useEffect: build graph + Sigma instance ───
   useEffect(() => {
@@ -1238,6 +1285,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
 
     // Create Sigma instance
     const effectiveNodeCount = progressiveMode ? 1 : data.nodes.length;
+    const labelColorValue = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#fff';
     const sigma = new Sigma(graph, containerRef.current, {
       renderEdgeLabels: false,
       renderLabels: p.nodeSize >= 3, // initial; live-updated via setSetting
@@ -1247,7 +1295,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
       nodeProgramClasses: { pictogram: NodeProgram, circle: NodeCircleProgram },
       labelSize: p.nodeSize >= 3 ? 12 : 10,
       labelWeight: '600',
-      labelColor: { color: '#fff' },
+      labelColor: { color: labelColorValue },
       labelRenderedSizeThreshold: effectiveNodeCount > 5000 ? 20 : 8,
       enableEdgeEvents: effectiveNodeCount < 2000,
       allowInvalidContainer: true,
@@ -1484,29 +1532,19 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
         {progressiveMode && graphId && (
           <>
             <button
+              onClick={loadPrevLevel}
+              title="Revenir au niveau précédent"
+              style={{ backgroundColor: visibleNodesHistory.length > 0 ? '#607D8B' : '#444' }}
+              disabled={visibleNodesHistory.length === 0}
+            >
+              <i className="bi bi-dash-circle"></i> -1
+            </button>
+            <button
               onClick={loadNextLevel}
-              title={`Charger +1 niveau ${useCache ? '(cache)' : '(sans cache)'}`}
+              title="Charger +1 niveau"
               style={{ backgroundColor: '#2196F3' }}
             >
-              <i className="bi bi-plus-circle"></i> +1 {useCache ? '(Cache)' : '(Raw)'}
-            </button>
-            <button
-              onClick={benchmarkNextLevel}
-              title="Comparer cache vs raw pour le niveau suivant"
-              style={{ backgroundColor: '#9C27B0' }}
-            >
-              <i className="bi bi-speedometer2"></i> ⚡ Benchmark
-            </button>
-            <button
-              onClick={() => setUseCache(!useCache)}
-              title={useCache ? 'Désactiver le cache' : 'Activer le cache'}
-              style={{
-                backgroundColor: useCache ? '#4CAF50' : '#666',
-                minWidth: 80,
-              }}
-            >
-              <i className={useCache ? 'bi bi-database-fill-check' : 'bi bi-database-slash'}></i>
-              {' '}{useCache ? 'Cache ON' : 'Cache OFF'}
+              <i className="bi bi-plus-circle"></i> +1
             </button>
             <button
               onClick={resetToStart}
@@ -1710,12 +1748,12 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
             <div className="benchmark-result">
               <strong><i className="bi bi-speedometer2"></i> Benchmark (Niveau {benchmarkResult.depth})</strong>
               <div className="benchmark-row">
-                <span className="benchmark-label">🟢 Cache</span>
+                <span className="benchmark-label"> Cache</span>
                 <span className="benchmark-value">{benchmarkResult.cachedMs.toFixed(1)}ms</span>
                 <span className="benchmark-detail">(layout: {benchmarkResult.cachedLayoutMs.toFixed(1)}ms)</span>
               </div>
               <div className="benchmark-row">
-                <span className="benchmark-label">🔴 Raw</span>
+                <span className="benchmark-label"> Raw</span>
                 <span className="benchmark-value">{benchmarkResult.rawMs.toFixed(1)}ms</span>
                 <span className="benchmark-detail">(layout: {benchmarkResult.rawLayoutMs.toFixed(1)}ms)</span>
               </div>
@@ -1772,7 +1810,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
                       <span>Moy. cache: <strong>{avgC.toFixed(0)}ms</strong> ({ce.length} runs)</span>
                       <span>Moy. raw: <strong>{avgR.toFixed(0)}ms</strong> ({re.length} runs)</span>
                       {gain > 0 ? (
-                        <span style={{ color: '#4CAF50' }}>⚡ Gain: <strong>{gain.toFixed(0)}%</strong></span>
+                        <span style={{ color: '#4CAF50' }}> Gain: <strong>{gain.toFixed(0)}%</strong></span>
                       ) : (
                         <span style={{ color: '#FF9800' }}>Pas de gain significatif</span>
                       )}
@@ -1804,7 +1842,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
       {timingDetails && (
         <div className="sigma-timing-details">
           <button className="timing-toggle" onClick={() => setTimingOpen(!timingOpen)}>
-            ⏱️ Timing details {timingOpen ? '▼' : '▶'}
+             Timing details {timingOpen ? '▼' : '▶'}
           </button>
           {timingOpen && (
             <div className="timing-breakdown">

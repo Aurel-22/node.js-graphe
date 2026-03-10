@@ -2,7 +2,7 @@
   position: relative;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #0f1419 0%, #16213e 100%);
+  background: linear-gradient(135deg, var(--graph-bg, #0f1419) 0%, var(--graph-bg-end, #16213e) 100%);
   overflow: hidden;
   border-radius: 12px;
 }
@@ -44,11 +44,11 @@
   position: absolute;
   bottom: 20px;
   left: 20px;
-  background: rgba(15, 20, 25, 0.95);
+  background: var(--bg-overlay, rgba(15, 20, 25, 0.95));
   padding: 16px;
   border-radius: 12px;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  border: 1px solid var(--border-accent, rgba(102, 126, 234, 0.3));
   z-index: 10;
   max-width: 250px;
   max-height: 400px;
@@ -129,8 +129,8 @@
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(15, 20, 25, 0.95);
-  color: white;
+  background: var(--bg-overlay, rgba(15, 20, 25, 0.95));
+  color: var(--text-primary, white);
   padding: 12px 20px;
   border-radius: 8px;
   font-size: 14px;
@@ -242,10 +242,10 @@
   position: absolute;
   bottom: 20px;
   right: 20px;
-  background: rgba(15, 20, 25, 0.95);
+  background: var(--bg-overlay, rgba(15, 20, 25, 0.95));
   padding: 12px 16px;
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary, rgba(255, 255, 255, 0.9));
   font-size: 13px;
   display: flex;
   gap: 8px;
@@ -263,12 +263,12 @@
   z-index: 10;
   min-width: 260px;
   max-width: 280px;
-  background: rgba(15, 20, 25, 0.97);
+  background: var(--bg-overlay, rgba(15, 20, 25, 0.97));
   border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 16px var(--shadow, rgba(0, 0, 0, 0.5));
   backdrop-filter: blur(12px);
   overflow: hidden;
-  border: 1px solid rgba(102, 126, 234, 0.3);
+  border: 1px solid var(--border-accent, rgba(102, 126, 234, 0.3));
 }
 
 .sigma-params-header {

@@ -20,31 +20,31 @@ interface QueryExample {
 
 const CYPHER_EXAMPLES: QueryExample[] = [
   {
-    label: '📊 Compter les nœuds',
+    label: ' Compter les nœuds',
     description: 'Nombre total de nœuds dans la base',
     query: `MATCH (n:GraphNode) RETURN count(n) AS nodeCount`,
     engine: 'neo4j',
   },
   {
-    label: '📊 Compter les relations',
+    label: ' Compter les relations',
     description: 'Nombre total de relations',
     query: `MATCH ()-[r:CONNECTED_TO]->() RETURN count(r) AS edgeCount`,
     engine: 'neo4j',
   },
   {
-    label: '🔍 Lister les graphes',
+    label: ' Lister les graphes',
     description: 'Identifiants uniques de tous les graphes',
     query: `MATCH (n:GraphNode) RETURN DISTINCT n.graph_id AS graphId, count(n) AS nodes ORDER BY nodes DESC`,
     engine: 'neo4j',
   },
   {
-    label: '🏷️ Types de nœuds',
+    label: ' Types de nœuds',
     description: 'Distribution des types de nœuds',
     query: `MATCH (n:GraphNode) RETURN n.node_type AS type, count(n) AS count ORDER BY count DESC LIMIT 20`,
     engine: 'neo4j',
   },
   {
-    label: '🔗 Top 10 nœuds connectés',
+    label: ' Top 10 nœuds connectés',
     description: 'Les 10 nœuds avec le plus de relations sortantes',
     query: `MATCH (n:GraphNode)-[r:CONNECTED_TO]->()
 RETURN n.node_id AS nodeId, n.label AS label, count(r) AS outDegree
@@ -52,7 +52,7 @@ ORDER BY outDegree DESC LIMIT 10`,
     engine: 'neo4j',
   },
   {
-    label: '🌐 Voisins d\'un nœud',
+    label: ' Voisins d\'un nœud',
     description: 'Voisins directs du nœud C0_N0 (profondeur 1)',
     query: `MATCH (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO]->(neighbor:GraphNode)
 WHERE source.graph_id = neighbor.graph_id
@@ -60,7 +60,7 @@ RETURN neighbor.node_id AS nodeId, neighbor.label AS label, neighbor.node_type A
     engine: 'neo4j',
   },
   {
-    label: '🎯 Impact depth=3',
+    label: ' Impact depth=3',
     description: 'Nœuds impactés à profondeur 3 depuis C0_N0 (traversée variable-length)',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*1..3]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
@@ -69,7 +69,7 @@ ORDER BY level, nodeId`,
     engine: 'neo4j',
   },
   {
-    label: '⚡ Chemin le plus court',
+    label: ' Chemin le plus court',
     description: 'Plus court chemin entre deux nœuds (C0_N0 → C1_N0)',
     query: `MATCH path = shortestPath(
   (a:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*..10]-(b:GraphNode {node_id: 'C1_N0'})
@@ -79,7 +79,7 @@ RETURN [n IN nodes(path) | n.node_id] AS path, length(path) AS distance`,
     engine: 'neo4j',
   },
   {
-    label: '📈 Degré moyen',
+    label: ' Degré moyen',
     description: 'Degré sortant moyen des nœuds',
     query: `MATCH (n:GraphNode)
 OPTIONAL MATCH (n)-[r:CONNECTED_TO]->()
@@ -88,7 +88,7 @@ RETURN avg(degree) AS avgDegree, max(degree) AS maxDegree, min(degree) AS minDeg
     engine: 'neo4j',
   },
   {
-    label: '🏝️ Nœuds isolés',
+    label: ' Nœuds isolés',
     description: 'Nœuds sans aucune relation',
     query: `MATCH (n:GraphNode)
 WHERE NOT (n)-[:CONNECTED_TO]-() 
@@ -97,8 +97,8 @@ RETURN n.node_id AS nodeId, n.label AS label LIMIT 20`,
   },
   // ===== Exemples récursifs — comparaison de performance =====
   {
-    label: '🔴 Récursif depth=5',
-    description: '⚡ Neo4j: ~30ms | 🐢 MSSQL: ~300ms — traversée BFS profondeur 5',
+    label: ' Récursif depth=5',
+    description: ' Neo4j: ~30ms |  MSSQL: ~300ms — traversée BFS profondeur 5',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*1..5]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
 RETURN n.node_id AS nodeId, min(length(path)) AS level
@@ -106,8 +106,8 @@ ORDER BY level, nodeId`,
     engine: 'neo4j',
   },
   {
-    label: '🔴 Récursif depth=8',
-    description: '⚡ Neo4j: ~97ms | 🐢 MSSQL: ~18 637ms — divergence exponentielle',
+    label: ' Récursif depth=8',
+    description: ' Neo4j: ~97ms |  MSSQL: ~18 637ms — divergence exponentielle',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*1..8]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
 RETURN n.node_id AS nodeId, min(length(path)) AS level
@@ -115,7 +115,7 @@ ORDER BY level, nodeId`,
     engine: 'neo4j',
   },
   {
-    label: '🧭 BFS nœuds/niveau',
+    label: ' BFS nœuds/niveau',
     description: 'Compte les nœuds impactés par niveau de profondeur (BFS)',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*1..6]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
@@ -125,7 +125,7 @@ ORDER BY level`,
     engine: 'neo4j',
   },
   {
-    label: '🕸️ Composante connexe',
+    label: ' Composante connexe',
     description: 'Tous les nœuds accessibles depuis C0_N0 (BFS illimité)',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
@@ -133,7 +133,7 @@ RETURN count(DISTINCT n) AS reachableNodes, max(length(path)) AS maxDepth`,
     engine: 'neo4j',
   },
   {
-    label: '🔀 Explosion chemins',
+    label: ' Explosion chemins',
     description: 'Chemins vs nœuds uniques par niveau — visualise l\'explosion combinatoire',
     query: `MATCH path = (source:GraphNode {node_id: 'C0_N0'})-[:CONNECTED_TO*1..4]->(n:GraphNode)
 WHERE source.graph_id = n.graph_id
@@ -146,7 +146,7 @@ ORDER BY depth`,
 
 const SQL_EXAMPLES: QueryExample[] = [
   {
-    label: '📊 Compter les nœuds',
+    label: ' Compter les nœuds',
     description: 'Nombre total de nœuds par graphe',
     query: `SELECT graph_id, COUNT(*) AS node_count
 FROM graph_nodes
@@ -155,7 +155,7 @@ ORDER BY node_count DESC`,
     engine: 'mssql',
   },
   {
-    label: '📊 Compter les arêtes',
+    label: ' Compter les arêtes',
     description: 'Nombre total d\'arêtes par graphe',
     query: `SELECT graph_id, COUNT(*) AS edge_count
 FROM graph_edges
@@ -164,7 +164,7 @@ ORDER BY edge_count DESC`,
     engine: 'mssql',
   },
   {
-    label: '🔍 Lister les graphes',
+    label: ' Lister les graphes',
     description: 'Métadonnées de tous les graphes avec comptage',
     query: `SELECT g.id AS graph_id, g.title, g.graph_type,
        (SELECT COUNT(*) FROM graph_nodes n WHERE n.graph_id = g.id) AS nodes,
@@ -174,7 +174,7 @@ ORDER BY nodes DESC`,
     engine: 'mssql',
   },
   {
-    label: '🏷️ Types de nœuds',
+    label: ' Types de nœuds',
     description: 'Distribution des types de nœuds',
     query: `SELECT TOP 20 node_type, COUNT(*) AS cnt
 FROM graph_nodes
@@ -183,7 +183,7 @@ ORDER BY cnt DESC`,
     engine: 'mssql',
   },
   {
-    label: '🔗 Top 10 nœuds connectés',
+    label: ' Top 10 nœuds connectés',
     description: 'Les 10 nœuds avec le plus de relations sortantes',
     query: `SELECT TOP 10 n.node_id, n.label, COUNT(e.target_id) AS out_degree
 FROM graph_nodes n
@@ -193,24 +193,36 @@ ORDER BY out_degree DESC`,
     engine: 'mssql',
   },
   {
-    label: '🌐 Voisins d\'un nœud',
-    description: 'Voisins directs du nœud C0_N0 (JOIN simple)',
-    query: `SELECT n.node_id, n.label, n.node_type, e.edge_type
+    label: ' Voisins d\'un nœud',
+    description: 'Voisins directs du nœud le plus connecté (JOIN simple)',
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+-- Nœud avec le plus de relations sortantes
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
+
+SELECT n.node_id, n.label, n.node_type, e.edge_type
 FROM graph_edges e
 JOIN graph_nodes n ON n.graph_id = e.graph_id AND n.node_id = e.target_id
-WHERE e.source_id = 'C0_N0'`,
+WHERE e.graph_id = @gid AND e.source_id = @startNode`,
     engine: 'mssql',
   },
   {
-    label: '🎯 Impact CTE depth=3',
-    description: 'Traversée CTE récursive depuis C0_N0 (profondeur 3)',
-    query: `-- Utilise le plus grand graphe (cliquer sur un chip ci-dessus pour en choisir un)
-DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    label: ' Impact CTE depth=3',
+    description: 'Traversée CTE récursive depuis le nœud le plus connecté (profondeur 3)',
+    query: `-- Cliquer sur un chip ci-dessus pour choisir un graphe
+DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+-- Nœud de départ = celui avec le plus de relations sortantes
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
   FROM graph_nodes
-  WHERE graph_id = @gid AND node_id = 'C0_N0'
+  WHERE graph_id = @gid AND node_id = @startNode
 
   UNION ALL
 
@@ -222,14 +234,14 @@ WITH Impact AS (
 )
 SELECT node_id AS nodeId, MIN(lvl) AS level
 FROM Impact
-WHERE node_id <> 'C0_N0'
+WHERE node_id <> @startNode
 GROUP BY node_id
 ORDER BY level, node_id
 OPTION (MAXRECURSION 200)`,
     engine: 'mssql',
   },
   {
-    label: '📈 Degré moyen',
+    label: ' Degré moyen',
     description: 'Degré sortant moyen des nœuds',
     query: `SELECT
   AVG(CAST(deg AS FLOAT)) AS avg_degree,
@@ -244,7 +256,7 @@ FROM (
     engine: 'mssql',
   },
   {
-    label: '🏝️ Nœuds isolés',
+    label: ' Nœuds isolés',
     description: 'Nœuds sans aucune relation',
     query: `SELECT TOP 20 n.node_id, n.label
 FROM graph_nodes n
@@ -256,7 +268,7 @@ WHERE NOT EXISTS (
     engine: 'mssql',
   },
   {
-    label: '⏱️ Taille de la base',
+    label: ' Taille de la base',
     description: 'Lignes + taille physique sur disque (KB) par table',
     query: `-- Lignes par table
 SELECT 'graphs' AS tbl, COUNT(*) AS rows_count FROM graphs
@@ -279,13 +291,17 @@ ORDER BY total_kb DESC`,
   },
   // ===== Exemples récursifs — comparaison de performance =====
   {
-    label: '🔴 CTE depth=5',
-    description: '🐢 MSSQL: ~300-637ms | ⚡ Neo4j: ~30ms — CTE récursive profondeur 5',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    label: ' CTE depth=5',
+    description: ' MSSQL: ~300-637ms |  Neo4j: ~30ms — CTE récursive profondeur 5',
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
-  FROM graph_nodes WHERE graph_id = @gid AND node_id = 'C0_N0'
+  FROM graph_nodes WHERE graph_id = @gid AND node_id = @startNode
   UNION ALL
   SELECT n.node_id, i.lvl + 1
   FROM Impact i
@@ -294,19 +310,23 @@ WITH Impact AS (
   WHERE i.lvl < 5
 )
 SELECT node_id AS nodeId, MIN(lvl) AS level
-FROM Impact WHERE node_id <> 'C0_N0'
+FROM Impact WHERE node_id <> @startNode
 GROUP BY node_id ORDER BY level, node_id
 OPTION (MAXRECURSION 200)`,
     engine: 'mssql',
   },
   {
-    label: '🔴 CTE depth=8',
-    description: '💀 MSSQL: ~4-18 secondes | ⚡ Neo4j: ~7-97ms — explosion exponentielle',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    label: ' CTE depth=8',
+    description: ' MSSQL: ~4-18 secondes |  Neo4j: ~7-97ms — explosion exponentielle',
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
-  FROM graph_nodes WHERE graph_id = @gid AND node_id = 'C0_N0'
+  FROM graph_nodes WHERE graph_id = @gid AND node_id = @startNode
   UNION ALL
   SELECT n.node_id, i.lvl + 1
   FROM Impact i
@@ -315,19 +335,23 @@ WITH Impact AS (
   WHERE i.lvl < 8
 )
 SELECT node_id AS nodeId, MIN(lvl) AS level
-FROM Impact WHERE node_id <> 'C0_N0'
+FROM Impact WHERE node_id <> @startNode
 GROUP BY node_id ORDER BY level, node_id
 OPTION (MAXRECURSION 200)`,
     engine: 'mssql',
   },
   {
-    label: '🧭 BFS nœuds/niveau',
+    label: ' BFS nœuds/niveau',
     description: 'Nœuds impactés par niveau de profondeur — croissance exponentielle visible',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 
 WITH Impact AS (
   SELECT node_id, 0 AS lvl
-  FROM graph_nodes WHERE graph_id = @gid AND node_id = 'C0_N0'
+  FROM graph_nodes WHERE graph_id = @gid AND node_id = @startNode
   UNION ALL
   SELECT n.node_id, i.lvl + 1
   FROM Impact i
@@ -336,19 +360,23 @@ WITH Impact AS (
   WHERE i.lvl < 5
 )
 SELECT lvl AS depth, COUNT(DISTINCT node_id) AS nodes_at_level
-FROM Impact WHERE node_id <> 'C0_N0'
+FROM Impact WHERE node_id <> @startNode
 GROUP BY lvl ORDER BY lvl
 OPTION (MAXRECURSION 200)`,
     engine: 'mssql',
   },
   {
-    label: '🔀 Explosion chemins CTE',
+    label: ' Explosion chemins CTE',
     description: 'Nombre de lignes brutes vs nœuds uniques — montre pourquoi UNION ALL explose',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 
 WITH AllPaths AS (
   SELECT node_id, 0 AS lvl
-  FROM graph_nodes WHERE graph_id = @gid AND node_id = 'C0_N0'
+  FROM graph_nodes WHERE graph_id = @gid AND node_id = @startNode
   UNION ALL
   SELECT n.node_id, i.lvl + 1
   FROM AllPaths i
@@ -362,21 +390,25 @@ SELECT
   COUNT(*) AS raw_rows,
   COUNT(DISTINCT node_id) AS unique_nodes,
   COUNT(*) - COUNT(DISTINCT node_id) AS wasted_rows
-FROM AllPaths WHERE node_id <> 'C0_N0'
+FROM AllPaths WHERE node_id <> @startNode
 GROUP BY lvl ORDER BY lvl
 OPTION (MAXRECURSION 200)`,
     engine: 'mssql',
   },
   {
-    label: '💡 BFS optimisé',
+    label: ' BFS optimisé',
     description: 'CTE avec déduplication par niveau — 10-50× plus rapide que la CTE naïve',
-    query: `DECLARE @gid NVARCHAR(255) = (SELECT TOP 1 id FROM graphs ORDER BY node_count DESC);
+    query: `DECLARE @gid NVARCHAR(255) = 'GRAPH_ID_HERE';
+DECLARE @startNode NVARCHAR(255) = (
+  SELECT TOP 1 source_id FROM graph_edges WHERE graph_id = @gid
+  GROUP BY source_id ORDER BY COUNT(*) DESC
+);
 DECLARE @maxDepth INT = 8;
 
 CREATE TABLE #frontier (node_id NVARCHAR(255) PRIMARY KEY);
 CREATE TABLE #visited  (node_id NVARCHAR(255) PRIMARY KEY, lvl INT);
-INSERT INTO #frontier VALUES ('C0_N0');
-INSERT INTO #visited  VALUES ('C0_N0', 0);
+INSERT INTO #frontier VALUES (@startNode);
+INSERT INTO #visited  VALUES (@startNode, 0);
 
 DECLARE @d INT = 1;
 WHILE @d <= @maxDepth AND EXISTS (SELECT 1 FROM #frontier)
@@ -393,7 +425,7 @@ BEGIN
 END
 
 SELECT node_id AS nodeId, lvl AS level FROM #visited
-WHERE node_id <> 'C0_N0' ORDER BY level, node_id;
+WHERE node_id <> @startNode ORDER BY level, node_id;
 DROP TABLE #frontier; DROP TABLE #visited;`,
     engine: 'mssql',
   },

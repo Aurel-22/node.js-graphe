@@ -305,7 +305,7 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, graphId }
           graphData={graphData3D}
           width={dimensions.width}
           height={dimensions.height}
-          backgroundColor="#0a0e14"
+          backgroundColor={getComputedStyle(document.documentElement).getPropertyValue('--graph-bg').trim() || '#0a0e14'}
           nodeThreeObject={nodeThreeObject}
           nodeThreeObjectExtend={false}
           linkColor={(link: any) => {

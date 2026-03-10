@@ -73,6 +73,8 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
   const [serverDepth, setServerDepth] = useState(5);
   const [clientImpactCount, setClientImpactCount] = useState<number | null>(null);
   const [clientImpactTime, setClientImpactTime] = useState<number | null>(null);
+  const [impactedNodesList, setImpactedNodesList] = useState<Array<{ id: string; label: string }>>([]);
+  const [showImpactedList, setShowImpactedList] = useState(false);
 
   const updateStats = useCallback(() => {
     const states = nodeStatesRef.current;
@@ -110,6 +112,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     });
 
     let impactedCount = 0;
+    const impactedNodes: Array<{ id: string; label: string }> = [];
     while (queue.length > 0) {
       const current = queue.shift()!;
       const currentState = states.get(current);
@@ -126,6 +129,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
         graph.setNodeAttribute(current, 'color', STATUS_COLORS.impacted);
         graph.setNodeAttribute(current, 'image', STATUS_ICONS.impacted);
         impactedCount++;
+        impactedNodes.push({ id: current, label: graph.getNodeAttribute(current, 'label') || current });
         graph.forEachOutNeighbor(current, (neighbor) => {
           if (!visited.has(neighbor)) { queue.push(neighbor); visited.add(neighbor); }
         });
@@ -150,6 +154,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     // Track client timing
     setClientImpactCount(impactedCount);
     setClientImpactTime(performance.now() - bfsStart);
+    setImpactedNodesList(impactedNodes);
     setServerImpactResult(null); // reset server result on new blocking node
     console.info(`Impact: ${impactedCount} nodes impacted from ${nodeId}`);
   }, [updateStats]);
@@ -352,6 +357,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
 
     // Create Sigma instance
     try {
+      const labelColorValue = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#fff';
       const sigma = new Sigma(graph, containerRef.current, {
         renderLabels: !isLarge,
         renderEdgeLabels: false,
@@ -360,7 +366,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
         defaultEdgeColor: sizes.edgeColor,
         labelSize: isLarge ? 10 : 12,
         labelWeight: '600',
-        labelColor: { color: '#fff' },
+        labelColor: { color: labelColorValue },
         labelRenderedSizeThreshold: sizes.labelThreshold,
         enableEdgeEvents: !isLarge,
         allowInvalidContainer: true,
@@ -587,7 +593,39 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
               )}
             </div>
           )}
-        </div>
+          {/* Liste des éléments impactés */}
+          {impactedNodesList.length > 0 && (
+            <div className="impacted-list-section">
+              <button
+                className="impacted-list-toggle"
+                onClick={() => setShowImpactedList(v => !v)}
+              >
+                <i className={`bi ${showImpactedList ? 'bi-chevron-up' : 'bi-chevron-down'}`}></i>
+                {' '}{impactedNodesList.length} éléments impactés
+              </button>
+              {showImpactedList && (
+                <ul className="impacted-list">
+                  {impactedNodesList.map((n) => (
+                    <li
+                      key={n.id}
+                      className="impacted-list-item"
+                      onClick={() => {
+                        // Center camera on the impacted node
+                        if (sigmaRef.current && graphRef.current?.hasNode(n.id)) {
+                          const pos = graphRef.current.getNodeAttributes(n.id);
+                          sigmaRef.current.getCamera().animate({ x: pos.x, y: pos.y, ratio: 0.3 }, { duration: 400 });
+                        }
+                      }}
+                    >
+                      <i className="bi bi-exclamation-triangle-fill" style={{ color: '#FF9800', fontSize: '0.8em' }}></i>
+                      <span className="impacted-list-label" title={n.id}>{n.label}</span>
+                      <span className="impacted-list-id">{n.id}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}        </div>
       )}
       <div ref={containerRef} className="impact-container" />
 
