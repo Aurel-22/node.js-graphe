@@ -23,7 +23,7 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
   const [timingOpen, setTimingOpen] = useState(false);
   const startTimeRef = useRef<number>(0);
   const dataPrepTimeRef = useRef<number>(0);
-  const [nodeTypes, setNodeTypes] = useState<Array<{ type: string; color: string; count: number }>>([]);
+  const [_nodeTypes, setNodeTypes] = useState<Array<{ type: string; color: string; count: number }>>([]);
 
   // Mettre à jour les dimensions
   useEffect(() => {

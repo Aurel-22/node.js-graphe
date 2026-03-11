@@ -57,35 +57,40 @@ const NODE_COLORS: Record<string, string> = {
   default: '#9E9E9E',
 };
 
-// Générateur de couleur déterministe pour types inconnus
+// Générateur de couleur déterministe pour types inconnus (retourne du hex pour Sigma WebGL)
 const generateColorFromString = (str: string): string => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
   
-  // Générer une couleur vive et contrastée
   const h = Math.abs(hash % 360);
   const s = 65 + (Math.abs(hash) % 20); // 65-85%
   const l = 50 + (Math.abs(hash >> 8) % 15); // 50-65%
   
-  return `hsl(${h}, ${s}%, ${l}%)`;
+  // HSL → RGB → hex (Sigma WebGL ne supporte pas hsl())
+  const s1 = s / 100, l1 = l / 100;
+  const c = (1 - Math.abs(2 * l1 - 1)) * s1;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l1 - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
 // ─── Iconify API: 200 000+ icons from 150+ collections ───
 // Helpers per collection
 const mdi    = (n: string) => `https://api.iconify.design/mdi/${n}.svg`;
-const ph     = (n: string) => `https://api.iconify.design/ph/${n}.svg`;
 const tabler = (n: string) => `https://api.iconify.design/tabler/${n}.svg`;
 const lucide = (n: string) => `https://api.iconify.design/lucide/${n}.svg`;
 const carbon = (n: string) => `https://api.iconify.design/carbon/${n}.svg`;
-const fluent = (n: string) => `https://api.iconify.design/fluent/${n}.svg`;
-const si     = (n: string) => `https://api.iconify.design/simple-icons/${n}.svg`;      // real brand logos
-const game   = (n: string) => `https://api.iconify.design/game-icons/${n}.svg`;         // 4000+ unique icons
-const ic     = (n: string) => `https://api.iconify.design/ic/${n}.svg`;                 // Google Material
-const bi     = (n: string) => `https://api.iconify.design/bi/${n}.svg`;                 // Bootstrap via Iconify
-const ri     = (n: string) => `https://api.iconify.design/ri/${n}.svg`;                 // Remix Icon
-const fa6    = (n: string) => `https://api.iconify.design/fa6-solid/${n}.svg`;          // Font Awesome 6
+const si     = (n: string) => `https://api.iconify.design/simple-icons/${n}.svg`;
 
 // ── Explicit type → icon (~250 semantic mappings using mixed collections) ──
 const NODE_ICONS: Record<string, string> = {
@@ -560,18 +565,6 @@ const NodePictogramProgram = createNodeImageProgram({
 
 const NodeProgram = createNodeCompoundProgram([NodeCircleProgram, NodePictogramProgram]);
 
-// Calcul adaptatif des tailles selon le nombre de nœuds
-function getAdaptiveSizes(nodeCount: number) {
-  if (nodeCount > 10000) {
-    return { nodeSize: 2, edgeSize: 0.3, hoverSize: 6, edgeColor: 'rgba(100,100,100,0.15)' };
-  } else if (nodeCount > 5000) {
-    return { nodeSize: 3, edgeSize: 0.5, hoverSize: 8, edgeColor: 'rgba(100,100,100,0.25)' };
-  } else if (nodeCount > 1000) {
-    return { nodeSize: 5, edgeSize: 1, hoverSize: 10, edgeColor: '#555' };
-  }
-  return { nodeSize: 10, edgeSize: 2, hoverSize: 15, edgeColor: '#666' };
-}
-
 // Adaptive presets based on graph size (for parameter panel defaults)
 function getDefaultSigmaParams(nodeCount: number) {
   if (nodeCount > 10000) {
@@ -698,7 +691,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
   useEffect(() => { visibleNodesRef.current = visibleNodes; }, [visibleNodes]);
 
   // ─── Cache performance comparison ───
-  const [useCache, setUseCache] = useState(true);
+  const [useCache, _setUseCache] = useState(true);
   const useCacheRef = useRef(true);
   useEffect(() => { useCacheRef.current = useCache; }, [useCache]);
   const [levelTimings, setLevelTimings] = useState<LevelTiming[]>([]);
@@ -1036,97 +1029,6 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     sigmaRef.current?.refresh();
   }, [data, adjacency, nodeIndex, graphId, nodeTypes]);
 
-  // ─── Benchmark: compare cache vs raw for next level ───
-  const benchmarkNextLevel = useCallback(() => {
-    if (!graphRef.current || !data || data.nodes.length === 0 || !graphId) return;
-
-    const graph = graphRef.current;
-    const p = renderParamsRef.current;
-
-    // Discover next-level nodes (read-only, same logic as loadNextLevel)
-    const currentNodes = new Set<string>();
-    graph.forEachNode((nodeId) => currentNodes.add(nodeId));
-    if (currentNodes.size >= data.nodes.length || currentNodes.size === 0) return;
-
-    const newNodeIds = new Set<string>();
-    for (const nodeId of currentNodes) {
-      const neighbors = adjacency.get(nodeId);
-      if (neighbors) {
-        for (const neighbor of neighbors) {
-          if (!currentNodes.has(neighbor)) newNodeIds.add(neighbor);
-        }
-      }
-    }
-    if (newNodeIds.size === 0) return;
-
-    const allVisible = new Set([...currentNodes, ...newNodeIds]);
-    const cachedPositions = nodePositionCache.getGraphPositions(graphId);
-    const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
-
-    // Measure a single run: clone graph → add nodes → (optional) layout → time it
-    const measure = (withCache: boolean): { timeMs: number; layoutMs: number } => {
-      const tempGraph = graph.copy();
-      const positions = withCache ? cachedPositions : {};
-      const tStart = performance.now();
-
-      for (const nId of newNodeIds) {
-        const nd = nodeIndex.get(nId);
-        if (!nd) continue;
-        const pos = positions[nId];
-        tempGraph.addNode(nId, {
-          label: nd.label || nId, size: p.nodeSize,
-          color: NODE_COLORS[nd.node_type] || generateColorFromString(nd.node_type),
-          x: pos?.x ?? Math.random() * 500,
-          y: pos?.y ?? Math.random() * 500,
-          type: 'circle', nodeType: nd.node_type,
-        });
-      }
-
-      const existingEdges = new Set<string>();
-      tempGraph.forEachEdge((_e: string, _a: any, s: string, t: string) => existingEdges.add(`${s}->${t}`));
-      data!.edges.forEach((edge) => {
-        if (allVisible.has(edge.source) && allVisible.has(edge.target)) {
-          const key = `${edge.source}->${edge.target}`;
-          if (!existingEdges.has(key)) {
-            existingEdges.add(key);
-            try { tempGraph.addEdge(edge.source, edge.target, { size: p.edgeSize, color: edgeColorStr, type: 'line' }); } catch (error) { /* skip */ }
-          }
-        }
-      });
-
-      let layoutMs = 0;
-      const allCached = withCache && [...newNodeIds].every(nId => positions[nId]);
-      if (!allCached) {
-        const lStart = performance.now();
-        try {
-          const settings = forceAtlas2.inferSettings(tempGraph);
-          const count = tempGraph.order;
-          const iters = count > 10000 ? 10 : count > 5000 ? 15 : count > 1000 ? 20 : 30;
-          forceAtlas2.assign(tempGraph, {
-            iterations: iters,
-            settings: { ...settings, gravity: count > 5000 ? 0.3 : 1, scalingRatio: count > 5000 ? 10 : 5, barnesHutOptimize: count > 1000 },
-          });
-        } catch (error) { /* ignore */ }
-        layoutMs = performance.now() - lStart;
-      }
-
-      return { timeMs: performance.now() - tStart, layoutMs };
-    };
-
-    const cached = measure(true);
-    const raw = measure(false);
-
-    setBenchmarkResult({
-      depth: currentDepthRef.current + 1,
-      nodesAdded: newNodeIds.size,
-      totalNodes: allVisible.size,
-      cachedMs: cached.timeMs,
-      cachedLayoutMs: cached.layoutMs,
-      rawMs: raw.timeMs,
-      rawLayoutMs: raw.layoutMs,
-    });
-  }, [data, adjacency, nodeIndex, graphId]);
-
   // ─── Progressive: reset ───
   const resetToStart = useCallback(() => {
     if (!data || data.nodes.length === 0) return;
@@ -1357,7 +1259,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
       graph.forEachNode((node) => {
         const attributes = graph.getNodeAttributes(node);
         const nodeType = attributes.nodeType || 'default';
-        const originalColor = NODE_COLORS[nodeType] || NODE_COLORS.default;
+        const originalColor = NODE_COLORS[nodeType] || generateColorFromString(nodeType);
         graph.setNodeAttribute(node, 'color', originalColor);
         graph.setNodeAttribute(node, 'size', rp.nodeSize);
         graph.setNodeAttribute(node, 'highlighted', false);

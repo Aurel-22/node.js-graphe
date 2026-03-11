@@ -40,7 +40,116 @@ Application full-stack pour visualiser et gérer des graphes Neo4j avec support 
 
 ---
 
-## 🔧 Installation
+## �️ Architecture du projet
+
+```mermaid
+graph TD
+    ROOT["📦 node.js-graphe (monorepo)"]
+
+    ROOT --> BE["🟦 backend-nodejs\nExpress · TypeScript · port 8080"]
+    ROOT --> FE["🟩 frontend-graph-viewer\nReact 18 · Vite · port 5173"]
+
+    %% ─── Backend ───────────────────────────────────────────
+    subgraph BACKEND["Backend  (backend-nodejs/src/)"]
+        direction TB
+        IDX["index.ts\nServeur Express + WebSocket\nresolveEngine middleware\nGlobal error handler"]
+
+        subgraph ROUTES["routes/"]
+            R1["graphRoutes.ts\nGET|POST|DELETE /api/graphs\nImpact · Neighbors · Benchmark"]
+            R2["algorithmRoutes.ts\nPOST /api/graphs/:id/algorithms\n14 algorithmes"]
+            R3["databaseRoutes.ts\n/api/databases\nlist · create · delete"]
+            R4["cmdbRoutes.ts\n/api/cmdb\nImport EasyVista CMDB\n(MSSQL uniquement)"]
+        end
+
+        subgraph SERVICES["services/"]
+            S1["MssqlService.ts\nImplémente GraphDatabaseService\nBatch 500 nœuds / 400 arêtes\nPool de connexions par database"]
+            S2["AlgorithmService.ts\nGraphe en mémoire\nBFS · DFS · Dijkstra · PageRank\nCentralités · Louvain · SCC..."]
+            S3["GraphDatabaseService.ts\nInterface commune (contrat)"]
+            S4["MermaidParser.ts\nConvertit Mermaid → GraphData"]
+        end
+
+        subgraph MODELS["models/"]
+            M1["graph.ts\nGraphNode · GraphEdge\nGraphData · GraphSummary\nImpactResult · AlgorithmResult"]
+        end
+
+        IDX --> ROUTES
+        IDX --> S1
+        ROUTES --> S1
+        ROUTES --> S2
+        S1 -.->|"implémente"| S3
+        S2 --> M1
+        S1 --> M1
+    end
+
+    %% ─── Frontend ──────────────────────────────────────────
+    subgraph FRONTEND["Frontend  (frontend-graph-viewer/src/)"]
+        direction TB
+        APP["App.tsx\n18 useState · 3 useEffect cascade\nEngine → Database → Graphs"]
+
+        subgraph VIEWERS["components/ — Visualiseurs"]
+            V1["GraphViewer\nreact-force-graph-2d\nPhysique 2D interactive"]
+            V2["SigmaGraphViewer\nSigma.js 3 + Graphology\nForceAtlas2 · Chargement progressif\nCache positions (localStorage)"]
+            V3["ForceGraph3DViewer\nThree.js 3D interactif"]
+            V4["D3GraphViewer\nSVG D3.js custom"]
+            V5["VisNetworkViewer\nvis-network"]
+        end
+
+        subgraph PANELS["components/ — Panneaux"]
+            P1["ImpactAnalysis\nPropagation en cascade\nSeuil 0-100%"]
+            P2["AlgorithmPanel\n14 algos avec résultats formatés"]
+            P3["QueryPanel\nSQL direct sur MSSQL"]
+            P4["LevelExplorer\nExploration par niveaux"]
+            P5["ClassificationFilterPanel\nFiltrage par type de nœud"]
+            P6["OptimPanel\nStats cache + performances"]
+            P7["GraphList · GraphFormModal\nFpsCounter"]
+        end
+
+        subgraph FSVC["services/"]
+            A1["api.ts\nAxios – 6 namespaces\ngraphApi · databaseApi · engineApi\ncmdbApi · algorithmApi · optimApi"]
+            A2["graphTransform.ts\n30+ NODE_COLORS\nHash HSL déterministe"]
+            A3["nodePositionCache.ts\nCache positions Sigma\n(localStorage)"]
+        end
+
+        subgraph FHOOKS["hooks/"]
+            H1["useTheme\nDark / Light toggle\nlocalStorage + data-theme"]
+            H2["useWebSocket\nWS auto-reconnect 3s\ngraph:created · graph:deleted"]
+        end
+
+        subgraph FTYPES["types/"]
+            T1["graph.ts\nGraphNode · GraphEdge\nGraphData · GraphSummary\n(miroir du backend)"]
+        end
+
+        APP --> VIEWERS
+        APP --> PANELS
+        APP --> FSVC
+        APP --> FHOOKS
+        FSVC --> FTYPES
+    end
+
+    %% ─── Communication ─────────────────────────────────────
+    FE -- "REST HTTP /api/*" --> BE
+    FE -- "WebSocket ws://…/ws" --> BE
+
+    %% ─── Styles ────────────────────────────────────────────
+    style ROOT    fill:#1e1e2e,color:#cdd6f4,stroke:#89b4fa
+    style BACKEND fill:#1e1e2e,color:#cdd6f4,stroke:#89b4fa
+    style FRONTEND fill:#1e1e2e,color:#cdd6f4,stroke:#a6e3a1
+    style IDX     fill:#313244,color:#cdd6f4,stroke:#89b4fa
+    style APP     fill:#313244,color:#cdd6f4,stroke:#a6e3a1
+    style S1      fill:#313244,color:#cdd6f4,stroke:#89dceb
+    style S2      fill:#313244,color:#cdd6f4,stroke:#89dceb
+    style S3      fill:#45475a,color:#bac2de,stroke:#6c7086
+    style S4      fill:#313244,color:#cdd6f4,stroke:#89dceb
+    style M1      fill:#45475a,color:#bac2de,stroke:#6c7086
+    style A1      fill:#313244,color:#cdd6f4,stroke:#fab387
+    style A2      fill:#313244,color:#cdd6f4,stroke:#fab387
+    style A3      fill:#313244,color:#cdd6f4,stroke:#fab387
+    style T1      fill:#45475a,color:#bac2de,stroke:#6c7086
+```
+
+---
+
+## �🔧 Installation
 
 ### 1. Cloner le repository
 

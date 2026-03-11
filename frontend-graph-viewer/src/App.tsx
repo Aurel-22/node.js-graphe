@@ -2,18 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { GraphList } from './components/GraphList';
 import { GraphViewer } from './components/GraphViewer';
 import SigmaGraphViewer from './components/SigmaGraphViewer';
-import G6GraphViewer from './components/G6GraphViewer';
 import D3GraphViewer from './components/D3GraphViewer';
-import CytoscapeGraphViewer from './components/CytoscapeGraphViewer';
 import VisNetworkViewer from './components/VisNetworkViewer';
 import ForceGraph3DViewer from './components/ForceGraph3DViewer';
 import ImpactAnalysis from './components/ImpactAnalysis';
 import QueryPanel from './components/QueryPanel';
 import AlgorithmPanel from './components/AlgorithmPanel';
-import LoadBenchmarkPanel from './components/LoadBenchmarkPanel';
 import { OptimPanel } from './components/OptimPanel';
-import ExportPanel from './components/ExportPanel';
 import GraphFormModal from './components/GraphFormModal';
+import ClassificationFilterPanel from './components/ClassificationFilterPanel';
+import LevelExplorer from './components/LevelExplorer';
 import { graphApi, databaseApi, engineApi, cmdbApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
@@ -21,8 +19,7 @@ import { useTheme } from './hooks/useTheme';
 import { useWebSocket, WsMessage } from './hooks/useWebSocket';
 import './App.css';
 
-type ViewerType = 'force-graph' | '3d' | 'sigma' | 'g6' | 'd3' | 'cytoscape' | 'vis-network' | 'impact' | 'query' | 'algorithms' | 'benchmark';
-type LoadMode = 'sql' | 'cache' | 'json';
+type ViewerType = 'force-graph' | '3d' | 'sigma' | 'd3' | 'vis-network' | 'impact' | 'query' | 'algorithms' | 'explorer';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -35,14 +32,13 @@ function App() {
   const [selectedGraphTitle, setSelectedGraphTitle] = useState<string>('');
   const [viewerType, setViewerType] = useState<ViewerType>('force-graph');
   const [databases, setDatabases] = useState<Database[]>([]);
-  const [selectedDatabase, setSelectedDatabase] = useState<string>('neo4j');
+  const [selectedDatabase, setSelectedDatabase] = useState<string>('graph_db');
   const [availableEngines, setAvailableEngines] = useState<string[]>([]);
   const [selectedEngine, setSelectedEngine] = useState<string>('');
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [cmdbImporting, setCmdbImporting] = useState(false);
-  const [loadMode, setLoadMode] = useState<LoadMode>('cache');
   const [lastLoadTime, setLastLoadTime] = useState<number | null>(null);
   const [lastLoadSource, setLastLoadSource] = useState<string>('');
+  const [filteredGraphData, setFilteredGraphData] = useState<GraphData | null>(null);
 
   // ── Theme toggle ──
   const { theme, toggleTheme } = useTheme();
@@ -100,13 +96,13 @@ function App() {
         setSelectedDatabase(defaultDb.name);
       } else {
         // Pas de DB trouvée, utiliser un défaut raisonnable pour déclencher loadGraphs
-        setSelectedDatabase(selectedEngine === 'mssql' ? 'graph_db' : 'neo4j');
+        setSelectedDatabase('graph_db');
       }
     } catch (err) {
       console.error('Failed to load databases:', err);
       // En cas d'erreur, utiliser une DB par défaut pour que les graphes se chargent quand même
       setDatabases([]);
-      setSelectedDatabase(selectedEngine === 'mssql' ? 'graph_db' : 'neo4j');
+      setSelectedDatabase('graph_db');
     }
   };
 
@@ -146,23 +142,8 @@ function App() {
       const selectedGraph = graphs.find(g => g.id === id);
       setSelectedGraphTitle(selectedGraph?.title || '');
 
-      // Mode JSON mémoire : si les données sont déjà chargées pour ce graphe, on ne refait pas de requête
-      if (loadMode === 'json' && rawGraphData && selectedGraphId === id) {
-        const t0 = performance.now();
-        const transformedData = transformGraphData(rawGraphData.nodes, rawGraphData.edges);
-        setGraphData(transformedData);
-        const elapsed = Math.round(performance.now() - t0);
-        setLastLoadTime(elapsed);
-        setLastLoadSource('JSON mémoire (aucun appel réseau)');
-        setGraphLoading(false);
-        return;
-      }
-
-      // Mode SQL : forcer nocache pour requêter la BDD à chaque fois
-      // Mode Cache : utiliser le cache backend (comportement par défaut)
-      const nocache = loadMode === 'sql';
       const t0 = performance.now();
-      const result = await graphApi.getGraph(id, selectedDatabase, { nocache, engine: selectedEngine as any });
+      const result = await graphApi.getGraph(id, selectedDatabase, { nocache: true, engine: selectedEngine as any });
       const elapsed = Math.round(performance.now() - t0);
 
       // Envoyer le résultat au panneau d'optimisations
@@ -172,11 +153,7 @@ function App() {
       setGraphData(transformedData);
 
       setLastLoadTime(elapsed);
-      if (loadMode === 'sql') {
-        setLastLoadSource(`SQL direct (${result.responseTimeHeader || elapsed + 'ms'} serveur, nocache)`);
-      } else {
-        setLastLoadSource(`Cache ${result.cacheStatus} (${result.responseTimeHeader || elapsed + 'ms'} serveur)`);
-      }
+      setLastLoadSource(`${result.cacheStatus === 'HIT' ? 'Cache' : 'SQL'} ${result.responseTimeHeader || ''} — ${selectedDatabase}`);
     } catch (err) {
       console.error('Failed to load graph:', err);
       setError('Failed to load graph data');
@@ -237,22 +214,52 @@ function App() {
     await loadGraphs();
   };
 
-  const handleCmdbImport = async () => {
-    setCmdbImporting(true);
+  const [valeoLoading, setValeoLoading] = useState(false);
+  const handleViewValeo = async () => {
+    setValeoLoading(true);
+    setError(null);
+    setGraphs([]);
+    setSelectedGraphId(null);
     try {
-      const result = await cmdbApi.importCmdb(800, selectedDatabase, selectedEngine as any);
-      await loadGraphs();
-      // Sélectionner le graphe importé automatiquement
-      if (result?.id) {
-        handleSelectGraph(result.id);
-      }
-      // Basculer en Sigma.js pour visualiser
+      const t0 = performance.now();
+      const result = await cmdbApi.viewValeo('cluster', 10, 800);
+      const elapsed = Math.round(performance.now() - t0);
+      setRawGraphData({ nodes: result.nodes, edges: result.edges });
+      setGraphData(transformGraphData(result.nodes, result.edges));
+      setSelectedGraphId(null);
+      setSelectedGraphTitle(`DATA_VALEO live (${result.nodes.length} nœuds, ${result.edges.length} relations) — ${elapsed} ms`);
+      setLastLoadTime(elapsed);
+      setLastLoadSource('DATA_VALEO direct');
+      setFilteredGraphData(null);
       setViewerType('sigma');
     } catch (err: any) {
-      console.error('CMDB import failed:', err);
-      setError(err?.response?.data?.error || 'Échec de l\'import CMDB');
+      console.error('DATA_VALEO view failed:', err);
+      setError(err?.response?.data?.error || 'Échec lecture DATA_VALEO');
     } finally {
-      setCmdbImporting(false);
+      setValeoLoading(false);
+    }
+  };
+
+  const handleViewValeoSubgraph = async (types: string) => {
+    setValeoLoading(true);
+    setError(null);
+    try {
+      const t0 = performance.now();
+      const result = await cmdbApi.viewValeo('subgraph', 10, 600000, types);
+      const elapsed = Math.round(performance.now() - t0);
+      setRawGraphData({ nodes: result.nodes, edges: result.edges });
+      setGraphData(transformGraphData(result.nodes, result.edges));
+      setSelectedGraphId(null);
+      setSelectedGraphTitle(`DATA_VALEO sous-graphe (${result.nodes.length} nœuds, ${result.edges.length} arêtes) — ${elapsed} ms`);
+      setLastLoadTime(elapsed);
+      setLastLoadSource('DATA_VALEO subgraph');
+      setFilteredGraphData(null);
+      setViewerType('sigma');
+    } catch (err: any) {
+      console.error('DATA_VALEO subgraph failed:', err);
+      setError(err?.response?.data?.error || 'Échec chargement sous-graphe');
+    } finally {
+      setValeoLoading(false);
     }
   };
 
@@ -341,14 +348,6 @@ function App() {
             >
               D3.js
             </button>
-            {/* Cytoscape — temporairement masqué
-            <button
-              className={viewerType === 'cytoscape' ? 'active' : ''}
-              onClick={() => setViewerType('cytoscape')}
-            >
-              Cytoscape
-            </button>
-            */}
             <button
               className={viewerType === 'vis-network' ? 'active' : ''}
               onClick={() => setViewerType('vis-network')}
@@ -365,7 +364,7 @@ function App() {
               className={viewerType === 'query' ? 'active' : ''}
               onClick={() => setViewerType('query')}
             >
-              SQL / Cypher
+              SQL Query
             </button>
             <button
               className={viewerType === 'algorithms' ? 'active' : ''}
@@ -373,27 +372,36 @@ function App() {
             >
               Algorithmes
             </button>
-            {/* Benchmark tab — temporairement masqué
             <button
-              className={viewerType === 'benchmark' ? 'active' : ''}
-              onClick={() => setViewerType('benchmark')}
+              className={viewerType === 'explorer' ? 'active' : ''}
+              onClick={() => setViewerType('explorer')}
             >
-              Benchmark
+              Explorer
             </button>
-            */}
           </div>
         </div>
         <div className="header-info">
-          {/* Bouton Importer CMDB — temporairement masqué
-          <button
-            className="cmdb-import-btn"
-            onClick={handleCmdbImport}
-            disabled={cmdbImporting}
-            title="Importer les CIs EasyVista comme graphe"
+          {selectedDatabase === 'DATA_VALEO' && (
+          <select
+            className="subgraph-select"
+            onChange={(e) => {
+              if (e.target.value) handleViewValeoSubgraph(e.target.value);
+              e.target.value = '';
+            }}
+            disabled={valeoLoading}
+            title="Charger un sous-graphe DATA_VALEO (20K-53K éléments)"
           >
-            {cmdbImporting ? '⏳ Import...' : '📦 Importer CMDB'}
-          </button>
-          */}
+            <option value="">📊 Sous-graphes</option>
+            <option value="318,317,262,347,346,343,359">B — 22K (7 types connectés)</option>
+            <option value="318,317,262,347,346,246,343,359">A — 30K (8 types connectés)</option>
+            <option value="318,317,262,347,346,246,343,359,321,293,291,342,308,358">C — 53K (tous petits types)</option>
+          </select>
+          )}
+          {lastLoadTime !== null && (
+            <span className="load-timing" title={lastLoadSource}>
+              ⏱ {lastLoadTime} ms {lastLoadSource && <small>({lastLoadSource})</small>}
+            </span>
+          )}
           <button className="theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -407,7 +415,7 @@ function App() {
       {error && (
         <div className="error-banner">
           <span> {error}</span>
-          <button onClick={loadGraphs}>Retry</button>
+          <button onClick={() => selectedDatabase === 'DATA_VALEO' ? handleViewValeo() : loadGraphs()}>Retry</button>
         </div>
       )}
 
@@ -423,33 +431,43 @@ function App() {
         />
         {viewerType === 'force-graph' ? (
           <GraphViewer
-            data={graphData}
+            data={filteredGraphData ? transformGraphData(filteredGraphData.nodes, filteredGraphData.edges) : graphData}
             title={selectedGraphTitle}
             loading={graphLoading}
           />
         ) : viewerType === '3d' ? (
           <div className="graph-viewer-container">
-            {/* ExportPanel — temporairement masqué */}
-            {/* <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} /> */}
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
                 <p>Chargement du graphe 3D...</p>
               </div>
             ) : (
-              <ForceGraph3DViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <ForceGraph3DViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
         ) : viewerType === 'sigma' ? (
           <div className="graph-viewer-container">
-            {/* <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} /> */}
-            {graphLoading ? (
+            {graphLoading || valeoLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
-                <p>Chargement du graphe...</p>
+                <p>{valeoLoading ? 'Chargement DATA_VALEO...' : 'Chargement du graphe...'}</p>
               </div>
             ) : (
-              <SigmaGraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+            )}
+            {selectedGraphTitle.includes('DATA_VALEO') && rawGraphData && rawGraphData.nodes.length > 0 && (
+              <LevelExplorer
+                initialData={rawGraphData}
+                sourceLabel={selectedGraphTitle}
+                onGraphData={(data, title) => {
+                  setRawGraphData(data);
+                  setGraphData(transformGraphData(data.nodes, data.edges));
+                  setSelectedGraphId(null);
+                  setSelectedGraphTitle(title);
+                  setFilteredGraphData(null);
+                }}
+              />
             )}
           </div>
         ) : viewerType === 'd3' ? (
@@ -461,36 +479,22 @@ function App() {
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <D3GraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
-            )}
-          </div>
-        ) : viewerType === 'cytoscape' ? (
-          <div className="graph-viewer-container">
-            {/* <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} /> */}
-            {graphLoading ? (
-              <div className="loading-state">
-                <div className="spinner"></div>
-                <p>Chargement du graphe...</p>
-              </div>
-            ) : (
-              <CytoscapeGraphViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <D3GraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
         ) : viewerType === 'vis-network' ? (
           <div className="graph-viewer-container">
-            {/* <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} /> */}
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <VisNetworkViewer data={rawGraphData} graphId={selectedGraphId || undefined} />
+              <VisNetworkViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
         ) : viewerType === 'impact' ? (
           <div className="graph-viewer-container">
-            {/* <ExportPanel data={rawGraphData} graphId={selectedGraphId || undefined} graphTitle={selectedGraphTitle} /> */}
             {graphLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
@@ -498,7 +502,7 @@ function App() {
               </div>
             ) : (
               <ImpactAnalysis
-                data={rawGraphData}
+                data={filteredGraphData || rawGraphData}
                 graphId={selectedGraphId || undefined}
                 database={selectedDatabase || undefined}
                 engine={selectedEngine || undefined}
@@ -516,34 +520,39 @@ function App() {
         ) : viewerType === 'algorithms' ? (
           <div className="graph-viewer-container">
             <AlgorithmPanel
-              data={rawGraphData}
+              data={filteredGraphData || rawGraphData}
               graphId={selectedGraphId || undefined}
               database={selectedDatabase || undefined}
               engine={selectedEngine || undefined}
             />
           </div>
-        ) : viewerType === 'benchmark' ? (
+        ) : viewerType === 'explorer' ? (
           <div className="graph-viewer-container">
-            <LoadBenchmarkPanel
-              graphId={selectedGraphId || undefined}
-              database={selectedDatabase || undefined}
-              engine={selectedEngine || undefined}
-              rawGraphData={rawGraphData}
+            <LevelExplorer
+              onGraphData={(data, title) => {
+                setRawGraphData(data);
+                setGraphData(transformGraphData(data.nodes, data.edges));
+                setSelectedGraphId(null);
+                setSelectedGraphTitle(title);
+                setFilteredGraphData(null);
+              }}
             />
-          </div>
-        ) : (
-          <div className="graph-viewer-container">
-            {graphLoading ? (
-              <div className="loading-state">
-                <div className="spinner"></div>
-                <p>Chargement du graphe...</p>
-              </div>
+            {rawGraphData && rawGraphData.nodes.length > 0 ? (
+              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
             ) : (
-              <G6GraphViewer graphData={rawGraphData!} />
+              <div className="loading-state">
+                <p>🔎 Recherchez un CI pour commencer l'exploration</p>
+              </div>
             )}
           </div>
-        )}
+        ) : null}
       </div>
+
+      {/* Panneau de filtrage par classification */}
+      <ClassificationFilterPanel
+        data={rawGraphData}
+        onFilteredData={setFilteredGraphData}
+      />
 
       {/* Panneau flottant des optimisations */}
       <OptimPanel

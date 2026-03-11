@@ -67,6 +67,8 @@ export interface ImpactResult {
   impactedNodes: Array<{ nodeId: string; level: number }>;
   /** Profondeur maximale utilisée */
   depth: number;
+  /** Seuil de propagation (0–100 %). 0 = propagation dès qu'un parent est impacté. */
+  threshold: number;
   /** Temps d'exécution en millisecondes (mesure serveur) */
   elapsed_ms: number;
   /** Moteur de base de données ayant produit ce résultat */

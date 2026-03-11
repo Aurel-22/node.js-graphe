@@ -284,7 +284,7 @@ export function cmdbRoutes(
               WHERE l.CHILD_CI_ID IN (SELECT id FROM top_hubs)
             ) combined
           )
-          -- 3. Retourner les CIs du cluster
+          -- 3. Retourner les CIs du cluster avec classification
           SELECT
             a.ASSET_ID       AS asset_id,
             a.NETWORK_IDENTIFIER AS nom,
@@ -292,10 +292,21 @@ export function cmdbRoutes(
             a.IS_SERVICE     AS estUnService,
             a.CI_VERSION     AS version,
             ISNULL(hd.edge_count, 0) AS edge_count,
-            CASE WHEN th.id IS NOT NULL THEN 1 ELSE 0 END AS is_hub
+            CASE WHEN th.id IS NOT NULL THEN 1 ELSE 0 END AS is_hub,
+            uc.UN_CLASSIFICATION_ID AS type_id,
+            uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id,
+            parent_uc.UN_CLASSIFICATION_FR AS family_label
           FROM cluster_ids ci
           INNER JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
             ON a.ASSET_ID = ci.node_id
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat
+            ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc
+            ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc
+            ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
           LEFT JOIN hub_degree hd ON hd.id = a.ASSET_ID
           LEFT JOIN top_hubs th ON th.id = a.ASSET_ID
           WHERE a.IS_CI = 1;
@@ -337,7 +348,12 @@ export function cmdbRoutes(
             a.ASSET_TAG      AS nDeCI,
             a.IS_SERVICE     AS estUnService,
             a.CI_VERSION     AS version,
-            edge_cnt.edge_count
+            edge_cnt.edge_count,
+            uc.UN_CLASSIFICATION_ID AS type_id,
+            uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id,
+            parent_uc.UN_CLASSIFICATION_FR AS family_label
           FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
           INNER JOIN (
             SELECT id, SUM(c) AS edge_count FROM (
@@ -350,6 +366,12 @@ export function cmdbRoutes(
               GROUP BY CHILD_CI_ID
             ) x GROUP BY id
           ) edge_cnt ON edge_cnt.id = a.ASSET_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat
+            ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc
+            ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc
+            ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
           WHERE a.IS_CI = 1
           ORDER BY edge_cnt.edge_count DESC
         `);
@@ -470,16 +492,21 @@ export function cmdbRoutes(
       const nodes = ciRows.map((ci: any) => ({
         id: `CI_${ci.asset_id}`,
         label: ci.nom || ci.nDeCI || `CI_${ci.asset_id}`,
-        node_type: ci.categorie || "CI",
+        node_type: ci.type_label || ci.categorie || "CI",
         properties: {
           asset_id: ci.asset_id,
           nom: ci.nom,
           nDeCI: ci.nDeCI,
-          categorie: ci.categorie || null,
+          categorie: ci.categorie || ci.type_label || null,
           statutDuCI: ci.statutDuCI || null,
           version: ci.version,
           disponibilite: ci.disponibilite || null,
           estUnService: ci.estUnService,
+          type_id: ci.type_id || null,
+          type_label: ci.type_label || null,
+          family_id: ci.family_id || null,
+          family_label: ci.family_label || null,
+          classification_level: ci.classification_level || null,
           ...(ci.edge_count != null ? { edge_count: ci.edge_count } : {}),
         },
       }));
@@ -536,6 +563,466 @@ export function cmdbRoutes(
       res.status(500).json({
         error: `Erreur d'import DATA_VALEO : ${error.message}`,
       });
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // GET /view-valeo — Lecture directe depuis DATA_VALEO (lecture seule)
+  //   ?mode=cluster|connected|subgraph|default  ?hubs=10  ?limit=800
+  //   ?types=318,317,262  (pour mode=subgraph : filtrage par classification IDs)
+  //   Retourne le GraphData sans rien écrire dans dev-11
+  // ════════════════════════════════════════════════════════════════════
+  router.get("/view-valeo", async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 800, 600000);
+    const mode = (req.query.mode as string) || "cluster";
+    const hubs = Math.min(Number(req.query.hubs) || 10, 500);
+    const typesParam = (req.query.types as string) || "";
+    const t0 = Date.now();
+
+    try {
+      const pool = new sql.ConnectionPool({
+        server: mssqlConfig.host,
+        port: mssqlConfig.port,
+        user: mssqlConfig.user,
+        password: mssqlConfig.password,
+        database: DATA_VALEO_DB,
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 30_000,
+        requestTimeout: 600_000,
+      });
+      await pool.connect();
+
+      let ciRows: any[];
+      let clusterEdgeRows: any[] | null = null;
+
+      if (mode === "cluster") {
+        const clusterSql = `
+          ;WITH hub_degree AS (
+            SELECT id, SUM(c) AS edge_count FROM (
+              SELECT PARENT_CI_ID AS id, COUNT(*) AS c
+              FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK GROUP BY PARENT_CI_ID
+              UNION ALL
+              SELECT CHILD_CI_ID AS id, COUNT(*) AS c
+              FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK GROUP BY CHILD_CI_ID
+            ) x GROUP BY id
+          ),
+          top_hubs AS (
+            SELECT TOP (${hubs}) id, edge_count FROM hub_degree ORDER BY edge_count DESC
+          ),
+          cluster_ids AS (
+            SELECT DISTINCT node_id FROM (
+              SELECT id AS node_id FROM top_hubs
+              UNION
+              SELECT l.CHILD_CI_ID FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK l
+              WHERE l.PARENT_CI_ID IN (SELECT id FROM top_hubs)
+              UNION
+              SELECT l.PARENT_CI_ID FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK l
+              WHERE l.CHILD_CI_ID IN (SELECT id FROM top_hubs)
+            ) combined
+          )
+          SELECT
+            a.ASSET_ID AS asset_id, a.NETWORK_IDENTIFIER AS nom, a.ASSET_TAG AS nDeCI,
+            a.IS_SERVICE AS estUnService, a.CI_VERSION AS version,
+            ISNULL(hd.edge_count, 0) AS edge_count,
+            CASE WHEN th.id IS NOT NULL THEN 1 ELSE 0 END AS is_hub,
+            uc.UN_CLASSIFICATION_ID AS type_id, uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id, parent_uc.UN_CLASSIFICATION_FR AS family_label
+          FROM cluster_ids ci
+          INNER JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a ON a.ASSET_ID = ci.node_id
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
+          LEFT JOIN hub_degree hd ON hd.id = a.ASSET_ID
+          LEFT JOIN top_hubs th ON th.id = a.ASSET_ID
+          WHERE a.IS_CI = 1;
+        `;
+        const ciResult = await pool.request().query(clusterSql);
+        ciRows = ciResult.recordset;
+
+        const assetIds = ciRows.map((r: any) => r.asset_id);
+        const ID_BATCH = 1000;
+        clusterEdgeRows = [];
+        for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+          const batch = assetIds.slice(i, i + ID_BATCH);
+          const idList = batch.join(",");
+          const edgeResult = await pool.request().query(`
+            SELECT l.PARENT_CI_ID, l.CHILD_CI_ID, l.RELATION_TYPE_ID, l.BLOCKING,
+                   r.REFERENCE_FR AS relation_label
+            FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK l
+            LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_REFERENCE r ON r.REFERENCE_ID = l.RELATION_TYPE_ID
+            WHERE l.PARENT_CI_ID IN (${idList}) AND l.CHILD_CI_ID IN (${idList})
+          `);
+          clusterEdgeRows.push(...edgeResult.recordset);
+        }
+      } else if (mode === "connected") {
+        const connectedSql = `
+          ;WITH node_degree AS (
+            SELECT id, SUM(c) AS total_degree FROM (
+              SELECT PARENT_CI_ID AS id, COUNT(*) AS c
+              FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK GROUP BY PARENT_CI_ID
+              UNION ALL
+              SELECT CHILD_CI_ID AS id, COUNT(*) AS c
+              FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK GROUP BY CHILD_CI_ID
+            ) x GROUP BY id
+          )
+          SELECT TOP (${limit})
+            a.ASSET_ID AS asset_id, a.NETWORK_IDENTIFIER AS nom, a.ASSET_TAG AS nDeCI,
+            a.IS_SERVICE AS estUnService, a.CI_VERSION AS version,
+            nd.total_degree AS edge_count,
+            uc.UN_CLASSIFICATION_ID AS type_id, uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id, parent_uc.UN_CLASSIFICATION_FR AS family_label
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          JOIN node_degree nd ON nd.id = a.ASSET_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
+          WHERE a.IS_CI = 1
+          ORDER BY nd.total_degree DESC
+        `;
+        const ciResult = await pool.request().query(connectedSql);
+        ciRows = ciResult.recordset;
+      } else if (mode === "subgraph" && typesParam) {
+        // Filtrage par classification type IDs (ex: ?types=318,317,262)
+        const typeIds = typesParam.split(",").map((s: string) => parseInt(s.trim(), 10)).filter((n: number) => !isNaN(n));
+        if (typeIds.length === 0) {
+          await pool.close();
+          res.status(400).json({ error: "Paramètre types invalide" });
+          return;
+        }
+        const typeList = typeIds.join(",");
+        const subgraphSql = `
+          SELECT
+            a.ASSET_ID AS asset_id, a.NETWORK_IDENTIFIER AS nom, a.ASSET_TAG AS nDeCI,
+            a.IS_SERVICE AS estUnService, a.CI_VERSION AS version,
+            uc.UN_CLASSIFICATION_ID AS type_id, uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id, parent_uc.UN_CLASSIFICATION_FR AS family_label
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
+          WHERE a.IS_CI = 1 AND uc.UN_CLASSIFICATION_ID IN (${typeList})
+        `;
+        const ciResult = await pool.request().query(subgraphSql);
+        ciRows = ciResult.recordset;
+      } else {
+        const ciResult = await pool.request().query(`
+          SELECT TOP (${limit})
+            a.ASSET_ID AS asset_id, a.NETWORK_IDENTIFIER AS nom, a.ASSET_TAG AS nDeCI,
+            a.IS_SERVICE AS estUnService, a.CI_VERSION AS version,
+            uc.UN_CLASSIFICATION_FR AS categorie,
+            uc.UN_CLASSIFICATION_ID AS type_id, uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id, parent_uc.UN_CLASSIFICATION_FR AS family_label
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
+          WHERE a.IS_CI = 1
+          ORDER BY a.NETWORK_IDENTIFIER
+        `);
+        ciRows = ciResult.recordset;
+      }
+
+      // Edges
+      let linkRows: any[];
+      if (clusterEdgeRows) {
+        linkRows = clusterEdgeRows;
+      } else {
+        const assetIdSet = new Set(ciRows.map((r: any) => r.asset_id));
+        const assetIds = [...assetIdSet];
+        const ID_BATCH = 1000;
+        linkRows = [];
+        for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+          const batch = assetIds.slice(i, i + ID_BATCH);
+          const idList = batch.join(",");
+          const edgeResult = await pool.request().query(`
+            SELECT l.PARENT_CI_ID, l.CHILD_CI_ID, l.RELATION_TYPE_ID, l.BLOCKING,
+                   r.REFERENCE_FR AS relation_label
+            FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK l
+            LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_REFERENCE r ON r.REFERENCE_ID = l.RELATION_TYPE_ID
+            WHERE l.PARENT_CI_ID IN (${idList}) AND l.CHILD_CI_ID IN (${idList})
+          `);
+          linkRows.push(...edgeResult.recordset);
+        }
+      }
+
+      await pool.close();
+
+      // Transform to GraphData (no write)
+      const nodes = ciRows.map((ci: any) => ({
+        id: `CI_${ci.asset_id}`,
+        label: ci.nom || ci.nDeCI || `CI_${ci.asset_id}`,
+        node_type: ci.type_label || ci.categorie || "CI",
+        properties: {
+          asset_id: ci.asset_id,
+          nom: ci.nom,
+          nDeCI: ci.nDeCI,
+          categorie: ci.categorie || ci.type_label || null,
+          type_id: ci.type_id || null,
+          type_label: ci.type_label || null,
+          family_id: ci.family_id || null,
+          family_label: ci.family_label || null,
+          classification_level: ci.classification_level || null,
+          ...(ci.edge_count != null ? { edge_count: ci.edge_count } : {}),
+        },
+      }));
+
+      const nodeIdSet = new Set(nodes.map((n: any) => n.id));
+      const edges = linkRows
+        .filter((l: any) => nodeIdSet.has(`CI_${l.PARENT_CI_ID}`) && nodeIdSet.has(`CI_${l.CHILD_CI_ID}`))
+        .map((l: any) => ({
+          source: `CI_${l.PARENT_CI_ID}`,
+          target: `CI_${l.CHILD_CI_ID}`,
+          label: l.relation_label || `type_${l.RELATION_TYPE_ID}`,
+          edge_type: l.relation_label || `type_${l.RELATION_TYPE_ID}`,
+          properties: {
+            relation_type_id: l.RELATION_TYPE_ID,
+            blocking: l.BLOCKING,
+          },
+        }));
+
+      const elapsed_ms = Date.now() - t0;
+      res.json({
+        nodes,
+        edges,
+        elapsed_ms,
+        source: DATA_VALEO_DB,
+        mode,
+      });
+    } catch (error: any) {
+      console.error("DATA_VALEO view error:", error);
+      res.status(500).json({ error: `Erreur lecture DATA_VALEO : ${error.message}` });
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // GET /classifications — Hiérarchie de classification DATA_VALEO
+  //   Retourne les familles (level 3) et types (level 4) avec comptage
+  // ════════════════════════════════════════════════════════════════════
+  router.get("/classifications", async (_req, res) => {
+    try {
+      const pool = new sql.ConnectionPool({
+        server: mssqlConfig.host,
+        port: mssqlConfig.port,
+        user: mssqlConfig.user,
+        password: mssqlConfig.password,
+        database: DATA_VALEO_DB,
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 15_000,
+        requestTimeout: 60_000,
+      });
+      await pool.connect();
+
+      const result = await pool.request().query(`
+        SELECT
+          uc.UN_CLASSIFICATION_ID AS id,
+          uc.UN_CLASSIFICATION_FR AS label,
+          uc.[LEVEL] AS level,
+          uc.PARENT_UN_CLASSIFICATION_ID AS parent_id,
+          COUNT(a.ASSET_ID) AS asset_count
+        FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc
+        LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG c
+          ON c.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+        LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          ON a.CATALOG_ID = c.CATALOG_ID
+        WHERE uc.[LEVEL] IN (3, 4)
+        GROUP BY uc.UN_CLASSIFICATION_ID, uc.UN_CLASSIFICATION_FR, uc.[LEVEL], uc.PARENT_UN_CLASSIFICATION_ID
+        HAVING COUNT(a.ASSET_ID) > 0
+        ORDER BY uc.[LEVEL], COUNT(a.ASSET_ID) DESC
+      `);
+
+      await pool.close();
+
+      const families = result.recordset
+        .filter((r: any) => r.level === 3)
+        .map((r: any) => ({ id: r.id, label: r.label, asset_count: r.asset_count }));
+
+      const types = result.recordset
+        .filter((r: any) => r.level === 4)
+        .map((r: any) => ({ id: r.id, label: r.label, parent_id: r.parent_id, asset_count: r.asset_count }));
+
+      res.json({ families, types });
+    } catch (error: any) {
+      console.error("Classifications error:", error);
+      res.status(500).json({ error: `Erreur: ${error.message}` });
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // GET /search-ci — Recherche de CIs dans DATA_VALEO par nom/tag
+  //   ?q=term&limit=30
+  // ════════════════════════════════════════════════════════════════════
+  router.get("/search-ci", async (req, res) => {
+    const q = ((req.query.q as string) || "").trim();
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    if (!q) {
+      res.status(400).json({ error: "Paramètre q requis" });
+      return;
+    }
+
+    try {
+      const pool = new sql.ConnectionPool({
+        server: mssqlConfig.host,
+        port: mssqlConfig.port,
+        user: mssqlConfig.user,
+        password: mssqlConfig.password,
+        database: DATA_VALEO_DB,
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 15_000,
+        requestTimeout: 30_000,
+      });
+      await pool.connect();
+
+      const result = await pool.request()
+        .input("q", sql.NVarChar, `%${q}%`)
+        .input("limit", sql.Int, limit)
+        .query(`
+          SELECT TOP (@limit)
+            a.ASSET_ID AS asset_id,
+            a.NETWORK_IDENTIFIER AS nom,
+            a.ASSET_TAG AS nDeCI,
+            uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.UN_CLASSIFICATION_ID AS type_id,
+            (
+              SELECT COUNT(*) FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK
+              WHERE PARENT_CI_ID = a.ASSET_ID OR CHILD_CI_ID = a.ASSET_ID
+            ) AS degree
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          WHERE a.IS_CI = 1
+            AND (a.NETWORK_IDENTIFIER LIKE @q OR a.ASSET_TAG LIKE @q)
+          ORDER BY a.NETWORK_IDENTIFIER
+        `);
+
+      await pool.close();
+      res.json(result.recordset);
+    } catch (error: any) {
+      console.error("Search CI error:", error);
+      res.status(500).json({ error: `Erreur: ${error.message}` });
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════
+  // GET /expand-ci — Retourne les voisins d'un ensemble de CIs
+  //   ?ids=123,456,789  (asset_ids à expandre)
+  //   Retourne { nodes[], edges[] } des voisins + arêtes connectées
+  // ════════════════════════════════════════════════════════════════════
+  router.get("/expand-ci", async (req, res) => {
+    const idsParam = ((req.query.ids as string) || "").trim();
+    if (!idsParam) {
+      res.status(400).json({ error: "Paramètre ids requis" });
+      return;
+    }
+    const assetIds = idsParam.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+    if (assetIds.length === 0) {
+      res.status(400).json({ error: "Paramètre ids invalide" });
+      return;
+    }
+
+    const t0 = Date.now();
+    try {
+      const pool = new sql.ConnectionPool({
+        server: mssqlConfig.host,
+        port: mssqlConfig.port,
+        user: mssqlConfig.user,
+        password: mssqlConfig.password,
+        database: DATA_VALEO_DB,
+        options: { encrypt: false, trustServerCertificate: true },
+        connectionTimeout: 15_000,
+        requestTimeout: 120_000,
+      });
+      await pool.connect();
+
+      // Process in batches of 500 IDs (MSSQL 2100 param limit)
+      const ID_BATCH = 500;
+      const neighborIds = new Set<number>();
+      const allEdges: Array<{ parent: number; child: number; relation_type_id: number; blocking: number; relation_label: string }> = [];
+
+      for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+        const batch = assetIds.slice(i, i + ID_BATCH);
+        const idList = batch.join(",");
+        const edgeResult = await pool.request().query(`
+          SELECT l.PARENT_CI_ID, l.CHILD_CI_ID, l.RELATION_TYPE_ID, l.BLOCKING,
+                 r.REFERENCE_FR AS relation_label
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].CONFIGURATION_ITEM_LINK l
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_REFERENCE r ON r.REFERENCE_ID = l.RELATION_TYPE_ID
+          WHERE l.PARENT_CI_ID IN (${idList}) OR l.CHILD_CI_ID IN (${idList})
+        `);
+        for (const row of edgeResult.recordset) {
+          neighborIds.add(row.PARENT_CI_ID);
+          neighborIds.add(row.CHILD_CI_ID);
+          allEdges.push({
+            parent: row.PARENT_CI_ID,
+            child: row.CHILD_CI_ID,
+            relation_type_id: row.RELATION_TYPE_ID,
+            blocking: row.BLOCKING,
+            relation_label: row.relation_label,
+          });
+        }
+      }
+
+      // Fetch node details for all neighbor IDs
+      const allNodeIds = [...neighborIds];
+      const nodeRows: any[] = [];
+      for (let i = 0; i < allNodeIds.length; i += ID_BATCH) {
+        const batch = allNodeIds.slice(i, i + ID_BATCH);
+        const idList = batch.join(",");
+        const nodeResult = await pool.request().query(`
+          SELECT
+            a.ASSET_ID AS asset_id, a.NETWORK_IDENTIFIER AS nom, a.ASSET_TAG AS nDeCI,
+            uc.UN_CLASSIFICATION_ID AS type_id, uc.UN_CLASSIFICATION_FR AS type_label,
+            uc.[LEVEL] AS classification_level,
+            parent_uc.UN_CLASSIFICATION_ID AS family_id, parent_uc.UN_CLASSIFICATION_FR AS family_label
+          FROM [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_ASSET a
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+          LEFT JOIN [${DATA_VALEO_DB}].[${DATA_VALEO_SCHEMA}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID
+          WHERE a.ASSET_ID IN (${idList})
+        `);
+        nodeRows.push(...nodeResult.recordset);
+      }
+
+      await pool.close();
+
+      const nodes = nodeRows.map((ci: any) => ({
+        id: `CI_${ci.asset_id}`,
+        label: ci.nom || ci.nDeCI || `CI_${ci.asset_id}`,
+        node_type: ci.type_label || "CI",
+        properties: {
+          asset_id: ci.asset_id,
+          nom: ci.nom,
+          nDeCI: ci.nDeCI,
+          type_id: ci.type_id || null,
+          type_label: ci.type_label || null,
+          family_id: ci.family_id || null,
+          family_label: ci.family_label || null,
+          classification_level: ci.classification_level || null,
+        },
+      }));
+
+      const edges = allEdges.map((e) => ({
+        source: `CI_${e.parent}`,
+        target: `CI_${e.child}`,
+        label: e.relation_label || `type_${e.relation_type_id}`,
+        edge_type: e.relation_label || `type_${e.relation_type_id}`,
+        properties: {
+          relation_type_id: e.relation_type_id,
+          blocking: e.blocking,
+        },
+      }));
+
+      res.json({
+        nodes,
+        edges,
+        elapsed_ms: Date.now() - t0,
+      });
+    } catch (error: any) {
+      console.error("Expand CI error:", error);
+      res.status(500).json({ error: `Erreur: ${error.message}` });
     }
   });
 

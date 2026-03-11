@@ -125,7 +125,7 @@ const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId }) => {
     dataTransform: number; svgSetup: number; domElements: number; simulation: number;
   } | null>(null);
   const [timingOpen, setTimingOpen] = useState(false);
-  const [nodeTypes, setNodeTypes] = useState<Array<{ type: string; count: number; color: string }>>([]);
+  const [_nodeTypes, setNodeTypes] = useState<Array<{ type: string; count: number; color: string }>>([]);
   const [hoveredNode, setHoveredNode] = useState<D3Node | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 

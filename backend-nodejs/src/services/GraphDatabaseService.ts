@@ -10,7 +10,6 @@ import {
 
 /**
  * Interface commune pour les services de base de données graphe.
- * Permet de comparer Neo4j et ArangoDB avec la même API.
  */
 export interface GraphDatabaseService {
   /** Nom du moteur (pour le logging / headers) */
@@ -56,19 +55,19 @@ export interface GraphDatabaseService {
   /**
    * Analyse d'impact côté serveur : BFS depuis nodeId sur les arêtes sortantes.
    * Retourne les nœuds impactés avec leur niveau (distance depuis la source).
-   * Plus lent sur MSSQL (CTE récursive) qu'sur Neo4j/Memgraph (Cypher natif).
    */
   computeImpact(
     graphId: string,
     nodeId: string,
     depth: number,
     database?: string,
+    threshold?: number,
   ): Promise<ImpactResult>;
 
   // ===== Cache =====
 
   /**
-   * Exécuter une requête brute (SQL pour MSSQL, Cypher pour Neo4j/Memgraph, AQL pour ArangoDB).
+   * Exécuter une requête brute SQL.
    * Retourne les résultats + le temps d'exécution.
    */
   executeRawQuery?(

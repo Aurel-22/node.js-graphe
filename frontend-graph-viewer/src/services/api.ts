@@ -10,7 +10,7 @@ const api = axios.create({
   },
 });
 
-export type EngineType = 'neo4j' | 'memgraph' | 'arangodb' | 'mssql';
+export type EngineType = 'mssql';
 
 export interface Database {
   name: string;
@@ -32,7 +32,7 @@ export interface GraphLoadResult {
   contentLength: number | null;    // taille compressée (gzip) en octets
   rawContentLength: number | null; // taille brute (avant gzip) en octets
   parallelQueries: boolean;
-  engine: string;                  // moteur utilisé (neo4j ou arangodb)
+  engine: string;                  // moteur utilisé
 }
 
 export interface CacheStats {
@@ -48,11 +48,12 @@ export interface ImpactResult {
   sourceNodeId: string;
   impactedNodes: Array<{ nodeId: string; level: number }>;
   depth: number;
+  threshold: number;
   elapsed_ms: number;
   engine: string;
 }
 
-/** Résultat d'exécution d'une requête brute (SQL / Cypher / AQL). */
+/** Résultat d'exécution d'une requête brute SQL. */
 export interface RawQueryResult {
   rows: Record<string, any>[];
   elapsed_ms: number;
@@ -242,20 +243,21 @@ export const graphApi = {
     return response.data;
   },
 
-  // Analyse d'impact côté serveur — compare BFS natif (Neo4j/Memgraph) vs CTE récursive (MSSQL)
+  // Analyse d'impact côté serveur
   computeImpact: async (
     graphId: string,
     nodeId: string,
     depth: number = 5,
     database?: string,
     engine?: EngineType,
+    threshold: number = 0,
   ): Promise<ImpactResult> => {
     const params: Record<string, string> = {};
     if (database) params.database = database;
     if (engine) params.engine = engine;
     const response = await api.post<ImpactResult>(
       `/graphs/${graphId}/impact`,
-      { nodeId, depth },
+      { nodeId, depth, threshold },
       { params },
     );
     return response.data;
@@ -267,7 +269,7 @@ export const graphApi = {
     return response.data;
   },
 
-  // Exécuter une requête brute (SQL pour MSSQL, Cypher pour Neo4j/Memgraph)
+  // Exécuter une requête brute SQL
   executeQuery: async (
     query: string,
     database?: string,
@@ -317,6 +319,45 @@ export const cmdbApi = {
     if (database) params.database = database;
     if (engine) params.engine = engine;
     const response = await api.post('/cmdb/import', { limit }, { params });
+    return response.data;
+  },
+
+  /** Lecture directe depuis DATA_VALEO (lecture seule, pas d'écriture) */
+  viewValeo: async (
+    mode: string = 'cluster',
+    hubs: number = 10,
+    limit: number = 800,
+    types?: string,
+  ): Promise<any> => {
+    const params: Record<string, any> = { mode, hubs, limit };
+    if (types) params.types = types;
+    const response = await api.get('/cmdb/view-valeo', { params });
+    return response.data;
+  },
+
+  /** Récupérer la hiérarchie de classification (familles + types) */
+  getClassifications: async (): Promise<{
+    families: Array<{ id: number; label: string; asset_count: number }>;
+    types: Array<{ id: number; label: string; parent_id: number | null; asset_count: number }>;
+  }> => {
+    const response = await api.get('/cmdb/classifications');
+    return response.data;
+  },
+
+  /** Rechercher des CIs dans DATA_VALEO par nom/tag */
+  searchCi: async (q: string, limit: number = 30): Promise<Array<{
+    asset_id: number; nom: string; nDeCI: string;
+    type_label: string; type_id: number; degree: number;
+  }>> => {
+    const response = await api.get('/cmdb/search-ci', { params: { q, limit } });
+    return response.data;
+  },
+
+  /** Expandre les voisins d'un ensemble de CIs */
+  expandCi: async (ids: number[]): Promise<{
+    nodes: Array<any>; edges: Array<any>; elapsed_ms: number;
+  }> => {
+    const response = await api.get('/cmdb/expand-ci', { params: { ids: ids.join(',') } });
     return response.data;
   },
 };

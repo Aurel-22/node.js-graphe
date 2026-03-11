@@ -25,6 +25,12 @@ import { GraphDatabaseService } from "./GraphDatabaseService.js";
 export class MssqlService implements GraphDatabaseService {
   readonly engineName = "mssql";
 
+  // Base contenant les graphs pré-stockés (pour comparaison cross-DB)
+  private static readonly GRAPH_STORE_DB = "dev-11";
+  // DATA_VALEO : schéma EasyVista natif
+  private static readonly DATA_VALEO_DB = "DATA_VALEO";
+  private static readonly DATA_VALEO_SCHEMA = "50004";
+
   private baseConfig: sql.config;
   private pools = new Map<string, sql.ConnectionPool>();
 
@@ -266,7 +272,8 @@ export class MssqlService implements GraphDatabaseService {
   }
 
   async getGraph(graphId: string, database?: string, bypassCache = false): Promise<GraphData> {
-    const cacheKey = `graph:${database || this.defaultDatabase}:${graphId}`;
+    const db = database || this.defaultDatabase;
+    const cacheKey = `graph:${db}:${graphId}`;
 
     if (!bypassCache) {
       const cached = this.graphCache.get<GraphData>(cacheKey);
@@ -276,7 +283,14 @@ export class MssqlService implements GraphDatabaseService {
       this.cacheStats.bypasses++;
     }
 
-    const pool = await this.getPool(database);
+    // ── DATA_VALEO : charger les mêmes graphes depuis les tables EasyVista ──
+    if (db === MssqlService.DATA_VALEO_DB) {
+      const result = await this.getGraphFromValeo(graphId);
+      if (!bypassCache) this.graphCache.set(cacheKey, result);
+      return result;
+    }
+
+    const pool = await this.getPool(db);
 
     // Requêtes nœuds + arêtes en parallèle
     const [nodesRes, edgesRes] = await Promise.all([
@@ -309,8 +323,152 @@ export class MssqlService implements GraphDatabaseService {
     return result;
   }
 
+  /**
+   * Charge un graphe depuis les tables EasyVista natives (DATA_VALEO).
+   * 1. Lit les node_id depuis [dev-11].dbo.graph_nodes (cross-DB) pour connaître les asset_ids
+   * 2. Lit les edges depuis [dev-11].dbo.graph_edges (cross-DB) pour connaître la structure
+   * 3. Pour chaque nœud, requête AM_ASSET + classification pour récupérer les infos live
+   * 4. Pour chaque arête, requête CONFIGURATION_ITEM_LINK + AM_REFERENCE pour le label
+   */
+  private async getGraphFromValeo(graphId: string): Promise<GraphData> {
+    const pool = await this.getPool(MssqlService.DATA_VALEO_DB);
+    const storeDb = MssqlService.GRAPH_STORE_DB;
+    const schema = MssqlService.DATA_VALEO_SCHEMA;
+    const dvDb = MssqlService.DATA_VALEO_DB;
+
+    // 1. Lire la liste des node_id depuis dev-11 (cross-database)
+    const nodeListRes = await pool.request()
+      .input("graphId", sql.NVarChar(255), graphId)
+      .query(`SELECT node_id FROM [${storeDb}].dbo.graph_nodes WHERE graph_id = @graphId`);
+
+    const nodeIds: string[] = nodeListRes.recordset.map((r: any) => r.node_id);
+    if (nodeIds.length === 0) return { nodes: [], edges: [] };
+
+    // Extraire les asset_ids (format CI_12345 → 12345)
+    const assetIds = nodeIds
+      .filter((id: string) => id.startsWith("CI_"))
+      .map((id: string) => parseInt(id.replace("CI_", ""), 10))
+      .filter((n: number) => !isNaN(n));
+
+    if (assetIds.length === 0) return { nodes: [], edges: [] };
+
+    // 2. Requêter les infos nœuds depuis les tables EasyVista (AM_ASSET + classification)
+    const ID_BATCH = 1000;
+    let batchSql = `CREATE TABLE #asset_ids (asset_id INT PRIMARY KEY);\n`;
+    for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+      const batch = assetIds.slice(i, i + ID_BATCH);
+      batchSql += `INSERT INTO #asset_ids (asset_id) VALUES ${batch.map((id: number) => `(${id})`).join(",")};\n`;
+    }
+    batchSql += `
+      SELECT
+        a.ASSET_ID       AS asset_id,
+        a.NETWORK_IDENTIFIER AS nom,
+        a.ASSET_TAG      AS nDeCI,
+        a.IS_SERVICE     AS estUnService,
+        a.CI_VERSION     AS version,
+        uc.UN_CLASSIFICATION_ID AS type_id,
+        uc.UN_CLASSIFICATION_FR AS type_label,
+        uc.[LEVEL] AS classification_level,
+        parent_uc.UN_CLASSIFICATION_ID AS family_id,
+        parent_uc.UN_CLASSIFICATION_FR AS family_label
+      FROM #asset_ids ai
+      INNER JOIN [${dvDb}].[${schema}].AM_ASSET a ON a.ASSET_ID = ai.asset_id
+      LEFT JOIN [${dvDb}].[${schema}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+      LEFT JOIN [${dvDb}].[${schema}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+      LEFT JOIN [${dvDb}].[${schema}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID;
+
+      -- Arêtes : lire les paires source/target depuis dev-11, puis enrichir
+      -- depuis CONFIGURATION_ITEM_LINK pour les labels/propriétés live EasyVista.
+      -- On ne prend que les relations correspondant aux arêtes stockées (pas toutes
+      -- les relations possibles entre les nœuds, qui seraient 1M+).
+      SELECT
+        e.id,
+        e.source_id,
+        e.target_id,
+        COALESCE(r.REFERENCE_FR COLLATE DATABASE_DEFAULT, e.label) AS label,
+        COALESCE(r.REFERENCE_FR COLLATE DATABASE_DEFAULT, e.edge_type) AS edge_type,
+        l.RELATION_TYPE_ID,
+        l.BLOCKING
+      FROM [${storeDb}].dbo.graph_edges e
+      LEFT JOIN [${dvDb}].[${schema}].CONFIGURATION_ITEM_LINK l
+        ON l.PARENT_CI_ID = CAST(REPLACE(e.source_id, 'CI_', '') AS INT)
+       AND l.CHILD_CI_ID  = CAST(REPLACE(e.target_id, 'CI_', '') AS INT)
+      LEFT JOIN [${dvDb}].[${schema}].AM_REFERENCE r
+        ON r.REFERENCE_ID = l.RELATION_TYPE_ID
+      WHERE e.graph_id = @graphId;
+
+      DROP TABLE #asset_ids;
+    `;
+
+    const batchResult = await pool.request()
+      .input("graphId", sql.NVarChar(255), graphId)
+      .query(batchSql);
+
+    const recordsets = batchResult.recordsets as any[];
+    const ciRows = recordsets[0] || [];
+    const edgeRows = recordsets[1] || [];
+
+    // 3. Transformer en GraphData
+    const nodes: GraphNode[] = ciRows.map((ci: any) => ({
+      id: `CI_${ci.asset_id}`,
+      label: ci.nom || ci.nDeCI || `CI_${ci.asset_id}`,
+      node_type: ci.type_label || "CI",
+      properties: {
+        asset_id: ci.asset_id,
+        nom: ci.nom,
+        nDeCI: ci.nDeCI,
+        type_id: ci.type_id || null,
+        type_label: ci.type_label || null,
+        family_id: ci.family_id || null,
+        family_label: ci.family_label || null,
+        classification_level: ci.classification_level || null,
+        version: ci.version,
+        estUnService: ci.estUnService,
+      },
+    }));
+
+    const edges: GraphEdge[] = edgeRows.map((r: any) => ({
+      id: String(r.id),
+      source: r.source_id,
+      target: r.target_id,
+      label: r.label || undefined,
+      edge_type: r.edge_type || "relation",
+      properties: {
+        relation_type_id: r.RELATION_TYPE_ID || null,
+        blocking: r.BLOCKING || null,
+      },
+    }));
+
+    return { nodes, edges };
+  }
+
   async listGraphs(database?: string): Promise<GraphSummary[]> {
-    const pool = await this.getPool(database);
+    const db = database || this.defaultDatabase;
+    const pool = await this.getPool(db);
+
+    // Pour DATA_VALEO : pas de table graphs locale → lister via cross-DB depuis dev-11
+    if (db === MssqlService.DATA_VALEO_DB) {
+      try {
+        const storeDb = MssqlService.GRAPH_STORE_DB;
+        const res = await pool.request().query(`
+          SELECT id, title, description, graph_type, node_count, edge_count
+          FROM [${storeDb}].dbo.graphs
+          ORDER BY created_at DESC
+        `);
+        return res.recordset.map((r: any) => ({
+          id: r.id,
+          title: `⚡ ${r.title}`,
+          description: r.description,
+          graph_type: r.graph_type,
+          node_count: r.node_count,
+          edge_count: r.edge_count,
+        }));
+      } catch (err) {
+        console.warn("Cross-DB listGraphs from dev-11 failed:", err);
+        return [];
+      }
+    }
+
     const res = await pool.request().query(`
       SELECT id, title, description, graph_type, node_count, edge_count
       FROM graphs
@@ -483,13 +641,18 @@ export class MssqlService implements GraphDatabaseService {
 
   /**
    * Analyse d'impact côté serveur — propagation BFS sortante via CTE récursive.
-   * AVERTISSEMENT : contrairement à Neo4j/Memgraph (pointeurs directs),
-   * chaque niveau effectue un JOIN sur la table complète → O(k^d × n).
+   * Chaque niveau effectue un JOIN sur la table complète → O(k^d × n).
    * Devient très lent au-delà de depth=4 sur de grands graphes.
    */
-  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string): Promise<ImpactResult> {
+  async computeImpact(graphId: string, nodeId: string, depth: number, database?: string, threshold: number = 0): Promise<ImpactResult> {
     const t0 = Date.now();
     const maxDepth = Math.min(depth, 15);
+
+    // Quand threshold > 0, on fait un BFS in-memory avec seuil de propagation
+    if (threshold > 0) {
+      return this.computeImpactWithThreshold(graphId, nodeId, maxDepth, database, threshold);
+    }
+
     const pool = await this.getPool(database);
 
     const res = await pool.request()
@@ -522,6 +685,64 @@ export class MssqlService implements GraphDatabaseService {
       sourceNodeId: nodeId,
       impactedNodes: res.recordset.map((r: any) => ({ nodeId: r.nodeId, level: r.level })),
       depth: maxDepth,
+      threshold: 0,
+      elapsed_ms: Date.now() - t0,
+      engine: this.engineName,
+    };
+  }
+
+  /**
+   * BFS in-memory avec seuil : un nœud est impacté seulement si au moins
+   * `threshold`% de ses parents entrants sont eux-mêmes impactés/bloquants.
+   */
+  private async computeImpactWithThreshold(
+    graphId: string, nodeId: string, maxDepth: number,
+    database: string | undefined, threshold: number,
+  ): Promise<ImpactResult> {
+    const t0 = Date.now();
+    const graphData = await this.getGraph(graphId, database);
+
+    // Build adjacency : outgoing neighbors + incoming parents
+    const outgoing = new Map<string, string[]>();
+    const incoming = new Map<string, string[]>();
+    for (const edge of graphData.edges) {
+      if (!outgoing.has(edge.source)) outgoing.set(edge.source, []);
+      outgoing.get(edge.source)!.push(edge.target);
+      if (!incoming.has(edge.target)) incoming.set(edge.target, []);
+      incoming.get(edge.target)!.push(edge.source);
+    }
+
+    const impacted = new Map<string, number>(); // nodeId → level
+    impacted.set(nodeId, 0);
+    let frontier = [nodeId];
+    const ratio = threshold / 100;
+
+    for (let level = 1; level <= maxDepth && frontier.length > 0; level++) {
+      const candidates = new Set<string>();
+      for (const src of frontier) {
+        for (const tgt of (outgoing.get(src) || [])) {
+          if (!impacted.has(tgt)) candidates.add(tgt);
+        }
+      }
+      const newFrontier: string[] = [];
+      for (const candidate of candidates) {
+        const parents = incoming.get(candidate) || [];
+        if (parents.length === 0) continue;
+        const impactedParents = parents.filter(p => impacted.has(p)).length;
+        if (impactedParents / parents.length >= ratio) {
+          impacted.set(candidate, level);
+          newFrontier.push(candidate);
+        }
+      }
+      frontier = newFrontier;
+    }
+
+    impacted.delete(nodeId);
+    return {
+      sourceNodeId: nodeId,
+      impactedNodes: Array.from(impacted.entries()).map(([id, level]) => ({ nodeId: id, level })),
+      depth: maxDepth,
+      threshold,
       elapsed_ms: Date.now() - t0,
       engine: this.engineName,
     };

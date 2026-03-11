@@ -25,7 +25,7 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
       const t0 = Date.now();
 
       // Vérifier le cache avant la requête pour savoir si c'est un HIT
-      const cacheKey = `graph:${database || "neo4j"}:${req.params.id}`;
+      const cacheKey = `graph:${database || "mssql"}:${req.params.id}`;
       const isHit = !bypassCache && (service as any).graphCache?.has(cacheKey);
 
       const graphData = await service.getGraph(req.params.id, database, bypassCache);
@@ -88,22 +88,24 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
   });
 
   // Server-side impact analysis — POST /graphs/:id/impact
-  // Body: { nodeId: string, depth?: number (1–15, default 5) }
+  // Body: { nodeId: string, depth?: number (1–15, default 5), threshold?: number (0–100) }
+  // threshold = pourcentage minimum de parents impactés pour propager (0 = dès qu'un seul parent est impacté)
   // Retourne les nœuds impactés en aval + temps de calcul côté serveur.
-  // Permet de comparer la latence entre le BFS client (graphology) et le moteur serveur.
   router.post("/graphs/:id/impact", async (req, res, next) => {
     try {
       const database = req.query.database as string | undefined;
-      const { nodeId, depth = 5 } = req.body as { nodeId?: string; depth?: number };
+      const { nodeId, depth = 5, threshold = 0 } = req.body as { nodeId?: string; depth?: number; threshold?: number };
       if (!nodeId) {
         return res.status(400).json({ error: "Missing nodeId in request body" });
       }
       const t0 = Date.now();
+      const safeThreshold = Math.max(0, Math.min(100, Number(threshold) || 0));
       const result = await service.computeImpact(
         req.params.id,
         nodeId,
         Math.min(Number(depth), 15),
-        database
+        database,
+        safeThreshold,
       );
       res.setHeader("X-Response-Time", `${Date.now() - t0}ms`);
       res.setHeader("X-Engine", service.engineName);

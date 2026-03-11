@@ -6,9 +6,6 @@ import { config } from "dotenv";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import { WebSocketServer, WebSocket } from "ws";
-import { Neo4jService } from "./services/Neo4jService.js";
-import { ArangoService } from "./services/ArangoService.js";
-import { MemgraphService } from "./services/MemgraphService.js";
 import { MssqlService } from "./services/MssqlService.js";
 import { GraphDatabaseService } from "./services/GraphDatabaseService.js";
 import { graphRoutes } from "./routes/graphRoutes.js";
@@ -36,91 +33,28 @@ app.use(compression({
 app.use(express.json({ limit: "50mb" }));
 app.use(pinoHttp({ logger }));
 
-// ===== Initialize database engines =====
+// ===== Initialize MSSQL engine =====
 
-const engines: Record<string, GraphDatabaseService> = {};
-
-// Initialize Neo4j (if configured)
-if (process.env.NEO4J_URI) {
-  const neo4jService = new Neo4jService(
-    process.env.NEO4J_URI,
-    process.env.NEO4J_USER!,
-    process.env.NEO4J_PASSWORD!,
-  );
-  await neo4jService.initialize();
-  engines.neo4j = neo4jService;
-  logger.info("Neo4j engine initialized");
-}
-
-// Initialize Memgraph (if configured)
-if (process.env.MEMGRAPH_URI) {
-  const memgraphService = new MemgraphService(process.env.MEMGRAPH_URI);
-  await memgraphService.initialize();
-  engines.memgraph = memgraphService;
-
-  // Créer le graphe de démo s'il n'existe pas encore
-  try {
-    const graphs = await memgraphService.listGraphs();
-    const hasDemo = graphs.some(g => g.id === "europe-cities-demo");
-    if (!hasDemo) {
-      await memgraphService.createDemoGraph();
-      logger.info("Memgraph demo graph 'europe-cities-demo' created");
-    } else {
-      logger.info("Memgraph demo graph already exists — skipping creation");
-    }
-  } catch (demoErr: any) {
-    logger.warn({ err: demoErr.message }, "Could not create Memgraph demo graph");
-  }
-
-  logger.info("Memgraph engine initialized");
-}
-
-// Initialize ArangoDB (if configured)
-if (process.env.ARANGO_URL) {
-  const arangoService = new ArangoService(
-    process.env.ARANGO_URL,
-    process.env.ARANGO_USER || "root",
-    process.env.ARANGO_PASSWORD || "",
-    process.env.ARANGO_DATABASE || "_system",
-  );
-  await arangoService.initialize();
-  engines.arangodb = arangoService;
-  logger.info("ArangoDB engine initialized");
-}
-
-// Initialize MSSQL (if configured)
-if (process.env.MSSQL_HOST) {
-  const mssqlService = new MssqlService(
-    process.env.MSSQL_HOST,
-    parseInt(process.env.MSSQL_PORT || "1433"),
-    process.env.MSSQL_USER || "sa",
-    process.env.MSSQL_PASSWORD || "",
-    process.env.MSSQL_DATABASE || "graph_db",
-  );
-  await mssqlService.initialize();
-  engines.mssql = mssqlService;
-  logger.info("MSSQL engine initialized");
-}
-
-// Determine default engine
-const defaultEngine = process.env.DEFAULT_ENGINE ||
-  (engines.neo4j ? "neo4j" : engines.memgraph ? "memgraph" : engines.mssql ? "mssql" : "arangodb");
-
-if (Object.keys(engines).length === 0) {
-  logger.error("No database engine configured! Set NEO4J_URI and/or ARANGO_URL in .env");
+if (!process.env.MSSQL_HOST) {
+  logger.error("MSSQL_HOST not configured in .env");
   process.exit(1);
 }
 
-/** Middleware : résoudre le service selon ?engine=neo4j|arangodb */
+const mssqlService = new MssqlService(
+  process.env.MSSQL_HOST,
+  parseInt(process.env.MSSQL_PORT || "1433"),
+  process.env.MSSQL_USER || "sa",
+  process.env.MSSQL_PASSWORD || "",
+  process.env.MSSQL_DATABASE || "graph_db",
+);
+await mssqlService.initialize();
+logger.info("MSSQL engine initialized");
+
+const dbService: GraphDatabaseService = mssqlService;
+
+/** Middleware : injecter le service MSSQL dans la requête */
 function resolveEngine(req: express.Request, _res: express.Response, next: express.NextFunction) {
-  const engineParam = (req.query.engine as string) || defaultEngine;
-  const service = engines[engineParam];
-  if (!service) {
-    return _res.status(400).json({
-      error: `Unknown engine '${engineParam}'. Available: ${Object.keys(engines).join(", ")}`,
-    });
-  }
-  (req as any).dbService = service;
+  (req as any).dbService = dbService;
   next();
 }
 
@@ -143,23 +77,20 @@ app.use("/api", resolveEngine, (req, res, next) => {
 });
 
 // ===== CMDB Import route =====
-if (process.env.MSSQL_HOST && engines.mssql) {
-  const mssqlService = engines.mssql as MssqlService;
-  app.use("/api/cmdb", cmdbRoutes(
-    {
-      host: process.env.MSSQL_HOST,
-      port: parseInt(process.env.MSSQL_PORT || "1433"),
-      user: process.env.MSSQL_USER || "sa",
-      password: process.env.MSSQL_PASSWORD || "",
-    },
-    mssqlService.createGraph.bind(mssqlService),
-    broadcast,
-  ));
-  logger.info("CMDB import route registered at POST /api/cmdb/import");
-}
+app.use("/api/cmdb", cmdbRoutes(
+  {
+    host: process.env.MSSQL_HOST,
+    port: parseInt(process.env.MSSQL_PORT || "1433"),
+    user: process.env.MSSQL_USER || "sa",
+    password: process.env.MSSQL_PASSWORD || "",
+  },
+  mssqlService.createGraph.bind(mssqlService),
+  broadcast,
+));
+logger.info("CMDB import route registered at POST /api/cmdb/import");
 
 // ===== Raw query execution endpoint =====
-// POST /api/query — execute raw SQL (MSSQL), Cypher (Neo4j/Memgraph), or AQL (ArangoDB)
+// POST /api/query — execute raw SQL
 app.post("/api/query", resolveEngine, async (req, res, next) => {
   try {
     const service: GraphDatabaseService = (req as any).dbService;
@@ -187,21 +118,21 @@ app.post("/api/query", resolveEngine, async (req, res, next) => {
   }
 });
 
-// Health check — liste les moteurs disponibles
+// Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
-    engines: Object.keys(engines),
-    defaultEngine,
+    engines: ["mssql"],
+    defaultEngine: "mssql",
   });
 });
 
 // Liste des moteurs disponibles
 app.get("/api/engines", (req, res) => {
   res.json({
-    available: Object.keys(engines),
-    default: defaultEngine,
+    available: ["mssql"],
+    default: "mssql",
   });
 });
 
@@ -226,7 +157,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws) => {
   logger.info("WebSocket client connected");
-  ws.send(JSON.stringify({ type: "connected", engines: Object.keys(engines) }));
+  ws.send(JSON.stringify({ type: "connected", engines: ["mssql"] }));
   ws.on("close", () => logger.info("WebSocket client disconnected"));
 });
 
@@ -243,5 +174,5 @@ function broadcast(message: Record<string, any>) {
 server.listen(PORT, HOST, () => {
   logger.info(`Server running at http://${HOST}:${PORT}`);
   logger.info(`WebSocket available at ws://${HOST}:${PORT}/ws`);
-  logger.info(`Available engines: ${Object.keys(engines).join(", ")} (default: ${defaultEngine})`);
+  logger.info(`Available engine: mssql`);
 });

@@ -75,6 +75,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
   const [clientImpactTime, setClientImpactTime] = useState<number | null>(null);
   const [impactedNodesList, setImpactedNodesList] = useState<Array<{ id: string; label: string }>>([]);
   const [showImpactedList, setShowImpactedList] = useState(false);
+  const [propagationThreshold, setPropagationThreshold] = useState(0);
 
   const updateStats = useCallback(() => {
     const states = nodeStatesRef.current;
@@ -101,11 +102,12 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     graph.setNodeAttribute(nodeId, 'color', STATUS_COLORS.blocking);
     graph.setNodeAttribute(nodeId, 'image', STATUS_ICONS.blocking);
 
-    // BFS propagation via outgoing neighbors
+    // BFS propagation via outgoing neighbors (with threshold)
     const queue: string[] = [];
     const visited = new Set<string>();
     visited.add(nodeId);
     const bfsStart = performance.now();
+    const ratio = propagationThreshold / 100;
 
     graph.forEachOutNeighbor(nodeId, (neighbor) => {
       if (!visited.has(neighbor)) { queue.push(neighbor); visited.add(neighbor); }
@@ -118,13 +120,19 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
       const currentState = states.get(current);
       if (!currentState) continue;
 
-      // AT LEAST ONE dependency is blocked/impacted => this node is impacted
-      const hasBlockedDep = currentState.dependencies.some((depId) => {
+      // Check threshold: count how many incoming parents are impacted/blocking
+      const totalParents = currentState.dependencies.length;
+      if (totalParents === 0) continue;
+      const impactedParents = currentState.dependencies.filter((depId) => {
         const depState = states.get(depId);
         return depState && (depState.status === 'blocking' || depState.status === 'impacted');
-      });
+      }).length;
 
-      if (hasBlockedDep && currentState.status === 'healthy') {
+      const meetsThreshold = ratio === 0
+        ? impactedParents > 0
+        : (impactedParents / totalParents) >= ratio;
+
+      if (meetsThreshold && currentState.status === 'healthy') {
         currentState.status = 'impacted';
         graph.setNodeAttribute(current, 'color', STATUS_COLORS.impacted);
         graph.setNodeAttribute(current, 'image', STATUS_ICONS.impacted);
@@ -156,8 +164,8 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     setClientImpactTime(performance.now() - bfsStart);
     setImpactedNodesList(impactedNodes);
     setServerImpactResult(null); // reset server result on new blocking node
-    console.info(`Impact: ${impactedCount} nodes impacted from ${nodeId}`);
-  }, [updateStats]);
+    console.info(`Impact: ${impactedCount} nodes impacted from ${nodeId} (threshold=${propagationThreshold}%)`);
+  }, [updateStats, propagationThreshold]);
 
   const resetSingleNode = useCallback((nodeId: string) => {
     if (!graphRef.current || !sigmaRef.current) return;
@@ -189,6 +197,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
 
     const visited = new Set<string>(blockingNodes);
     const nextQueue: string[] = [];
+    const ratio = propagationThreshold / 100;
     for (const bNode of blockingNodes) {
       graph.forEachOutNeighbor(bNode, (neighbor) => {
         if (!visited.has(neighbor)) { nextQueue.push(neighbor); visited.add(neighbor); }
@@ -201,12 +210,18 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
       const currentState = states.get(current);
       if (!currentState || currentState.status !== 'healthy') continue;
 
-      const hasBlockedDep = currentState.dependencies.some((depId) => {
+      const totalParents = currentState.dependencies.length;
+      if (totalParents === 0) continue;
+      const impactedParents = currentState.dependencies.filter((depId) => {
         const depState = states.get(depId);
         return depState && (depState.status === 'blocking' || depState.status === 'impacted');
-      });
+      }).length;
 
-      if (hasBlockedDep) {
+      const meetsThreshold = ratio === 0
+        ? impactedParents > 0
+        : (impactedParents / totalParents) >= ratio;
+
+      if (meetsThreshold) {
         currentState.status = 'impacted';
         graph.setNodeAttribute(current, 'color', STATUS_COLORS.impacted);
         graph.setNodeAttribute(current, 'image', STATUS_ICONS.impacted);
@@ -256,7 +271,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     sigma.refresh();
     updateStats();
     setSelectedNode(null);
-  }, [isAnimating, updateStats]);
+  }, [isAnimating, updateStats, propagationThreshold]);
 
   // Main effect: build graph and create Sigma
   useEffect(() => {
@@ -461,7 +476,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     setServerImpactResult(null);
     try {
       const result = await graphApi.computeImpact(
-        graphId, selectedNode, serverDepth, database, engine as EngineType
+        graphId, selectedNode, serverDepth, database, engine as EngineType, propagationThreshold
       );
       setServerImpactResult(result);
     } catch (err) {
@@ -469,7 +484,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
     } finally {
       setServerLoading(false);
     }
-  }, [selectedNode, graphId, serverDepth, database, engine]);
+  }, [selectedNode, graphId, serverDepth, database, engine, propagationThreshold]);
 
   const handleFitView = useCallback(() => {
     sigmaRef.current?.getCamera().animatedReset({ duration: 600 });
@@ -511,6 +526,21 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
           <i className="bi bi-arrow-counterclockwise"></i> Reset
         </button>
 
+        <div className="threshold-slider">
+          <label title="Pourcentage minimum de parents impactés requis pour propager l'impact">
+            <i className="bi bi-sliders"></i> Seuil : {propagationThreshold}%
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={propagationThreshold}
+            onChange={(e) => setPropagationThreshold(Number(e.target.value))}
+            title={`${propagationThreshold}% — L'impact se propage si ≥${propagationThreshold}% des parents entrants sont impactés`}
+          />
+        </div>
+
         <div className="impact-legend">
           <div className="legend-item">
             <i className="bi bi-check-circle-fill" style={{ color: '#4CAF50', fontSize: '1.1em' }}></i>
@@ -530,7 +560,7 @@ const ImpactAnalysis: React.FC<ImpactAnalysisProps> = ({ data, graphId, database
       <div className="impact-info">
         <h3><i className="bi bi-bullseye"></i> Analyse d'Impact</h3>
         <p><i className="bi bi-hand-index"></i> Cliquez sur un noeud pour le marquer comme bloquant</p>
-        <p><i className="bi bi-arrow-right-circle"></i> L'impact se propage aux successeurs</p>
+        <p><i className="bi bi-arrow-right-circle"></i> L'impact se propage aux successeurs{propagationThreshold > 0 ? ` (≥${propagationThreshold}% parents impactés)` : ''}</p>
         {isVeryLargeGraph && (
           <div className="warning-badge">
             <i className="bi bi-lightning-charge-fill"></i> Graphe massif ({data.nodes.length.toLocaleString()} noeuds) — optimisé

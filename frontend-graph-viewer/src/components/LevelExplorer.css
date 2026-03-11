@@ -1,0 +1,220 @@
+.level-explorer {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 10px;
+  padding: 12px 16px;
+  width: 340px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.level-explorer.le-compact {
+  width: auto;
+  min-width: 260px;
+  padding: 8px 14px;
+}
+
+.level-explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.level-explorer-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.le-reset-btn {
+  background: none;
+  border: 1px solid var(--border-color, #555);
+  color: var(--text-secondary, #aaa);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 8px;
+  transition: all 0.2s;
+}
+
+.le-reset-btn:hover {
+  background: var(--bg-hover, #333);
+  color: var(--text-primary, #fff);
+}
+
+.le-error {
+  color: #ef4444;
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 4px;
+}
+
+.le-search-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.le-search-bar input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  background: var(--bg-primary, #111);
+  color: var(--text-primary, #e0e0e0);
+  font-size: 13px;
+  outline: none;
+}
+
+.le-search-bar input:focus {
+  border-color: #6366f1;
+}
+
+.le-search-bar button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #6366f1;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.le-search-bar button:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.le-search-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.le-results {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+}
+
+.le-result-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--border-color, #2a2a2a);
+}
+
+.le-result-item:last-child {
+  border-bottom: none;
+}
+
+.le-result-item:hover {
+  background: var(--bg-hover, rgba(99, 102, 241, 0.15));
+}
+
+.le-ci-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.le-ci-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  margin-top: 2px;
+}
+
+.le-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.le-start-info {
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.le-start-info strong {
+  color: var(--text-primary, #fff);
+}
+
+.le-depth-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.le-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.le-btn-minus {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: white;
+}
+
+.le-btn-minus:hover:not(:disabled) {
+  background: linear-gradient(135deg, #ea580c, #c2410c);
+  transform: scale(1.05);
+}
+
+.le-btn-plus {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+}
+
+.le-btn-plus:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: scale(1.05);
+}
+
+.le-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.le-depth-badge {
+  background: var(--bg-primary, #111);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  min-width: 80px;
+  text-align: center;
+}
+
+.le-stats {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+}
+
+.le-stats span {
+  padding: 3px 8px;
+  background: var(--bg-primary, #111);
+  border-radius: 4px;
+}

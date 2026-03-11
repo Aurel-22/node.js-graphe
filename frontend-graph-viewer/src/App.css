@@ -139,6 +139,17 @@ body {
   font-size: 14px;
 }
 
+.header-info .load-timing {
+  background: rgba(102, 126, 234, 0.2);
+  color: var(--text-color);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
 .status {
   display: flex;
   align-items: center;
@@ -263,6 +274,26 @@ body {
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
 }
 .cmdb-import-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.subgraph-select {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.subgraph-select:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5, #4338ca);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+.subgraph-select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

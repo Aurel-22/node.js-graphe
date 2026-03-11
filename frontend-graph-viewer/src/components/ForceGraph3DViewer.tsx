@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import ForceGraph3D from 'react-force-graph-3d';
 import * as THREE from 'three';
 import { GraphData } from '../types/graph';
-import { getNodeColor, getEdgeColor, generateColorFromString } from '../services/graphTransform';
+import { getNodeColor, getEdgeColor } from '../services/graphTransform';
 import FpsCounter from './FpsCounter';
 import './ForceGraph3DViewer.css';
 
@@ -35,7 +35,7 @@ interface GraphData3D {
   links: Link3D[];
 }
 
-const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, graphId }) => {
+const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data }) => {
   const graphRef = useRef<any>();
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
