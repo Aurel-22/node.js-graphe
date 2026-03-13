@@ -230,7 +230,7 @@ export function cmdbRoutes(
     const limit = Math.min(Number(req.body?.limit) || 800, 600000);
     const mode = (req.body?.mode as string) || "default";
     const hubs = Math.min(Number(req.body?.hubs) || 10, 500);
-    const targetDatabase = (req.query.database as string) || "dev-11";
+    const targetDatabase = (req.query.database as string) || "DATA_VALEO";
     const t0 = Date.now();
 
     try {

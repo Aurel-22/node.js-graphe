@@ -1,5 +1,7 @@
 import { Router } from "express";
+import { encode } from "@msgpack/msgpack";
 import { GraphDatabaseService } from "../services/GraphDatabaseService.js";
+import { MssqlService } from "../services/MssqlService.js";
 import { MermaidParser } from "../services/MermaidParser.js";
 import { CreateGraphRequest } from "../models/graph.js";
 
@@ -8,39 +10,85 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
 
   // List all graphs
   router.get("/graphs", async (req, res, next) => {
+    const database = req.query.database as string | undefined;
     try {
-      const database = req.query.database as string | undefined;
       const graphs = await service.listGraphs(database);
+      MssqlService.sqlLog("HTTP", database || "default", {
+        method: "GET", route: "/graphs",
+        client: req.ip, count: graphs.length,
+      });
       res.json(graphs);
     } catch (error) {
+      MssqlService.sqlLog("ERROR", database || "default", {
+        method: "GET", route: "/graphs",
+        client: req.ip, error: (error as Error).message,
+      });
       next(error);
     }
   });
 
   // Get a specific graph
+  // Options: ?format=msgpack (binary), ?enrich=true (live EasyVista data), ?nocache=true
   router.get("/graphs/:id", async (req, res, next) => {
+    const database = req.query.database as string | undefined;
     try {
-      const database = req.query.database as string | undefined;
       const bypassCache = req.query.nocache === "true";
+      const format = req.query.format as string | undefined;
+      const enrich = req.query.enrich === "true";
       const t0 = Date.now();
 
       // Vérifier le cache avant la requête pour savoir si c'est un HIT
       const cacheKey = `graph:${database || "mssql"}:${req.params.id}`;
       const isHit = !bypassCache && (service as any).graphCache?.has(cacheKey);
 
-      const graphData = await service.getGraph(req.params.id, database, bypassCache);
+      let graphData = await service.getGraph(req.params.id, database, bypassCache);
+
+      // Enrichissement live EasyVista si demandé
+      if (enrich && service instanceof MssqlService) {
+        graphData = await service.enrichGraphFromEasyVista(graphData, database);
+      }
 
       const elapsed = Date.now() - t0;
-      const jsonStr = JSON.stringify(graphData);
-      const rawBytes = Buffer.byteLength(jsonStr, 'utf8');
+
       res.setHeader("X-Cache", bypassCache ? "BYPASS" : isHit ? "HIT" : "MISS");
       res.setHeader("X-Response-Time", `${elapsed}ms`);
       res.setHeader("X-Parallel-Queries", "true");
-      res.setHeader("X-Content-Length-Raw", rawBytes.toString());
       res.setHeader("X-Engine", service.engineName);
-      res.setHeader("Content-Type", "application/json");
-      res.send(jsonStr);
+      if (enrich) res.setHeader("X-Enriched", "true");
+
+      // MessagePack binary format
+      if (format === "msgpack") {
+        const msgpackBuf = Buffer.from(encode(graphData));
+        res.setHeader("X-Content-Length-Raw", msgpackBuf.length.toString());
+        res.setHeader("X-Format", "msgpack");
+        MssqlService.sqlLog("HTTP", database || "default", {
+          method: "GET", route: `/graphs/${req.params.id}`,
+          client: req.ip, format: "msgpack", enrich,
+          nodes: graphData.nodes.length, edges: graphData.edges.length,
+          responseSize: `${Math.round(msgpackBuf.length / 1024)}KB`,
+          duration: `${elapsed}ms`,
+        });
+        res.type("application/x-msgpack").send(msgpackBuf);
+      } else {
+        const jsonStr = JSON.stringify(graphData);
+        const rawBytes = Buffer.byteLength(jsonStr, 'utf8');
+        res.setHeader("X-Content-Length-Raw", rawBytes.toString());
+        res.setHeader("X-Format", "json");
+        res.setHeader("Content-Type", "application/json");
+        MssqlService.sqlLog("HTTP", database || "default", {
+          method: "GET", route: `/graphs/${req.params.id}`,
+          client: req.ip, format: "json", enrich,
+          nodes: graphData.nodes.length, edges: graphData.edges.length,
+          responseSize: `${Math.round(rawBytes / 1024)}KB`,
+          duration: `${elapsed}ms`,
+        });
+        res.send(jsonStr);
+      }
     } catch (error) {
+      MssqlService.sqlLog("ERROR", database || "default", {
+        method: "GET", route: `/graphs/${req.params.id}`,
+        client: req.ip, error: (error as Error).message,
+      });
       next(error);
     }
   });
@@ -115,12 +163,13 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
     }
   });
 
-  // Benchmark: compare SQL vs Cache vs JSON timing
-  // GET /graphs/:id/benchmark — runs SQL + cache queries and returns timings
+  // Benchmark: compare loading strategies
+  // GET /graphs/:id/benchmark?iterations=3
+  // Tests: SQL direct, Cache, JSON parse, MessagePack encode, Enrichment (if applicable)
   router.get("/graphs/:id/benchmark", async (req, res, next) => {
     try {
       const database = req.query.database as string | undefined;
-      const iterations = Math.min(parseInt(req.query.iterations as string) || 3, 10);
+      const iterations = Math.min(parseInt(req.query.iterations as string) || 3, 50);
 
       // 1. Warm up the cache first
       await service.getGraph(req.params.id, database, false);
@@ -151,13 +200,37 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
         jsonTimes.push(Math.round((performance.now() - t0) * 100) / 100);
       }
 
+      // 5. Measure MessagePack encode
+      const msgpackTimes: number[] = [];
+      let msgpackSize = 0;
+      for (let i = 0; i < iterations; i++) {
+        const t0 = performance.now();
+        const buf = encode(graphData);
+        msgpackTimes.push(Math.round((performance.now() - t0) * 100) / 100);
+        if (i === 0) msgpackSize = buf.byteLength;
+      }
+
+      // 6. Measure enrichment (if MssqlService and nodes have CI_ prefix)
+      const enrichTimes: number[] = [];
+      const isMssql = service instanceof MssqlService;
+      const hasCiNodes = graphData.nodes?.some((n: any) => n.id?.startsWith("CI_"));
+      if (isMssql && hasCiNodes) {
+        for (let i = 0; i < iterations; i++) {
+          // Deep clone to avoid mutating cached data
+          const clone = JSON.parse(JSON.stringify(graphData));
+          const t0 = performance.now();
+          await service.enrichGraphFromEasyVista(clone, database);
+          enrichTimes.push(Math.round((performance.now() - t0) * 100) / 100);
+        }
+      }
+
       const avg = (arr: number[]) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length * 100) / 100;
       const min = (arr: number[]) => Math.min(...arr);
       const max = (arr: number[]) => Math.max(...arr);
 
       const jsonSizeBytes = Buffer.byteLength(jsonStr, 'utf8');
 
-      res.json({
+      const result: Record<string, any> = {
         graphId: req.params.id,
         engine: service.engineName,
         database: database || 'default',
@@ -166,6 +239,9 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
         edgeCount: graphData.edges?.length || 0,
         jsonSizeBytes,
         jsonSizeKB: Math.round(jsonSizeBytes / 1024 * 10) / 10,
+        msgpackSizeBytes: msgpackSize,
+        msgpackSizeKB: Math.round(msgpackSize / 1024 * 10) / 10,
+        compressionRatio: Math.round((1 - msgpackSize / jsonSizeBytes) * 1000) / 10,
         sql: {
           times: sqlTimes,
           avg: avg(sqlTimes),
@@ -187,11 +263,36 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
           max: max(jsonTimes),
           label: 'JSON parse (désérialisation)',
         },
+        msgpack: {
+          times: msgpackTimes,
+          avg: avg(msgpackTimes),
+          min: min(msgpackTimes),
+          max: max(msgpackTimes),
+          label: 'MessagePack encode (sérialisation binaire)',
+        },
         speedup: {
           cacheVsSql: Math.round(avg(sqlTimes) / Math.max(avg(cacheTimes), 0.01) * 10) / 10,
           jsonVsSql: Math.round(avg(sqlTimes) / Math.max(avg(jsonTimes), 0.01) * 10) / 10,
+          msgpackVsJson: Math.round(avg(jsonTimes) / Math.max(avg(msgpackTimes), 0.01) * 10) / 10,
         },
-      });
+      };
+
+      if (enrichTimes.length > 0) {
+        result.enrich = {
+          times: enrichTimes,
+          avg: avg(enrichTimes),
+          min: min(enrichTimes),
+          max: max(enrichTimes),
+          label: 'Enrichissement live EasyVista',
+        };
+      }
+
+      // Check covering indexes status
+      if (isMssql) {
+        result.coveringIndexes = await service.hasCoveringIndexes(database);
+      }
+
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -302,18 +403,84 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
     res.json({ message: "Cache cleared", ...result });
   });
 
+  // ── Covering Indexes management ──
+
+  // GET /optim/indexes/covering — check if covering indexes exist
+  router.get("/optim/indexes/covering", async (req, res, next) => {
+    try {
+      if (!(service instanceof MssqlService)) {
+        res.status(400).json({ error: "Covering indexes only supported on MSSQL engine" });
+        return;
+      }
+      const database = req.query.database as string | undefined;
+      const exists = await service.hasCoveringIndexes(database);
+      res.json({ coveringIndexes: exists, database: database || "default" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // POST /optim/indexes/covering — create covering indexes
+  router.post("/optim/indexes/covering", async (req, res, next) => {
+    try {
+      if (!(service instanceof MssqlService)) {
+        res.status(400).json({ error: "Covering indexes only supported on MSSQL engine" });
+        return;
+      }
+      const database = req.query.database as string | undefined;
+      await service.createCoveringIndexes(database);
+      res.json({ message: "Covering indexes created", database: database || "default" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // DELETE /optim/indexes/covering — drop covering indexes
+  router.delete("/optim/indexes/covering", async (req, res, next) => {
+    try {
+      if (!(service instanceof MssqlService)) {
+        res.status(400).json({ error: "Covering indexes only supported on MSSQL engine" });
+        return;
+      }
+      const database = req.query.database as string | undefined;
+      await service.dropCoveringIndexes(database);
+      res.json({ message: "Covering indexes dropped", database: database || "default" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // GET /optim/status  — indique quelles optimisations sont actives
-  router.get("/optim/status", (_req, res) => {
-    res.json({
-      gzip: true,          // toujours actif (middleware global)
-      parallelQueries: true, // toujours actif dans getGraph
-      inMemoryCache: true, // toujours actif sauf ?nocache=true
-      cacheTtlSeconds: 300,
-      bypassFlags: {
-        cache: "?nocache=true",
-        gzip: "Accept-Encoding: identity header",
-      },
-    });
+  router.get("/optim/status", async (req, res, next) => {
+    try {
+      const database = req.query.database as string | undefined;
+      const isMssql = service instanceof MssqlService;
+
+      let coveringIndexes = false;
+      if (isMssql) {
+        coveringIndexes = await service.hasCoveringIndexes(database);
+      }
+
+      res.json({
+        gzip: true,
+        parallelQueries: true,
+        inMemoryCache: true,
+        cacheTtlSeconds: 300,
+        coveringIndexes,
+        msgpackSupport: true,
+        enrichmentSupport: isMssql,
+        bypassFlags: {
+          cache: "?nocache=true",
+          gzip: "Accept-Encoding: identity header",
+        },
+        queryParams: {
+          format: "?format=msgpack — retourne du MessagePack binaire au lieu de JSON",
+          enrich: "?enrich=true — enrichit les nœuds CI_ avec les données live EasyVista",
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   return router;

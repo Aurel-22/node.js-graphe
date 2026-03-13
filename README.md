@@ -472,27 +472,7 @@ Les contributions sont les bienvenues !
 4. Push vers la branche (`git push origin feature/amazing-feature`)
 5. Ouvrir une Pull Request
 
----
 
-## 📝 Licence
-
-Ce projet est sous licence MIT.
-
----
-
-## 🙏 Remerciements
-
-- **Neo4j** - Base de données graphe
-- **Sigma.js** - Rendu de graphes performant
-- **react-force-graph** - Visualisation interactive
-- **Graphology** - Manipulation de graphes JavaScript
-- **Vite** - Build tool ultra-rapide
-
----
-
-## 📧 Contact
-
-**Aurélien BARRE** - barreau@esisar.inpg.fr
 
 **Repository** : [https://github.com/Aurel-22/node.js-graphe](https://github.com/Aurel-22/node.js-graphe)
 

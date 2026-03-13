@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { decode } from '@msgpack/msgpack';
 import { GraphData, GraphSummary, GraphStats } from '../types/graph';
 
 const API_BASE_URL = 'http://172.23.0.162:8080/api';
@@ -33,6 +34,8 @@ export interface GraphLoadResult {
   rawContentLength: number | null; // taille brute (avant gzip) en octets
   parallelQueries: boolean;
   engine: string;                  // moteur utilisé
+  format: 'json' | 'msgpack';     // format de réponse
+  enriched: boolean;               // données enrichies EasyVista
 }
 
 export interface CacheStats {
@@ -82,12 +85,19 @@ export interface BenchmarkResult {
   edgeCount: number;
   jsonSizeBytes: number;
   jsonSizeKB: number;
+  msgpackSizeBytes: number;
+  msgpackSizeKB: number;
+  compressionRatio: number;        // % réduction msgpack vs json
   sql: BenchmarkTimings;
   cache: BenchmarkTimings;
   json: BenchmarkTimings;
+  msgpack: BenchmarkTimings;
+  enrich?: BenchmarkTimings;       // présent si nœuds CI_ détectés
+  coveringIndexes?: boolean;       // état des covering indexes
   speedup: {
     cacheVsSql: number;
     jsonVsSql: number;
+    msgpackVsJson: number;
   };
 }
 
@@ -183,17 +193,30 @@ export const graphApi = {
   getGraph: async (
     id: string,
     database?: string,
-    options?: { nocache?: boolean; nocompress?: boolean; engine?: EngineType }
+    options?: { nocache?: boolean; nocompress?: boolean; engine?: EngineType; format?: 'json' | 'msgpack'; enrich?: boolean }
   ): Promise<GraphLoadResult> => {
     const params: Record<string, string> = {};
     if (database) params.database = database;
     if (options?.nocache) params.nocache = 'true';
     if (options?.nocompress) params.nocompress = 'true';
     if (options?.engine) params.engine = options.engine;
+    if (options?.format) params.format = options.format;
+    if (options?.enrich) params.enrich = 'true';
+
+    const useMsgpack = options?.format === 'msgpack';
 
     const t0 = performance.now();
-    const response = await api.get<GraphData>(`/graphs/${id}`, { params });
+    const response = useMsgpack
+      ? await api.get(`/graphs/${id}`, { params, responseType: 'arraybuffer' })
+      : await api.get<GraphData>(`/graphs/${id}`, { params });
     const timeMs = Math.round(performance.now() - t0);
+
+    let data: GraphData;
+    if (useMsgpack) {
+      data = decode(new Uint8Array(response.data as ArrayBuffer)) as GraphData;
+    } else {
+      data = response.data as GraphData;
+    }
 
     const cacheHeader = response.headers['x-cache'] || response.headers['X-Cache'];
     const responseTimeHeader = response.headers['x-response-time'] || response.headers['X-Response-Time'] || null;
@@ -203,9 +226,11 @@ export const graphApi = {
     const rawContentLength = rawLengthStr ? parseInt(rawLengthStr, 10) : null;
     const parallelQueries = (response.headers['x-parallel-queries'] || response.headers['X-Parallel-Queries']) === 'true';
     const engineHeader = response.headers['x-engine'] || response.headers['X-Engine'] || 'unknown';
+    const formatHeader = response.headers['x-format'] || 'json';
+    const enrichedHeader = response.headers['x-enriched'] === 'true';
 
     return {
-      data: response.data,
+      data,
       timeMs,
       cacheStatus: (cacheHeader as GraphLoadResult['cacheStatus']) ?? 'unknown',
       responseTimeHeader,
@@ -213,6 +238,8 @@ export const graphApi = {
       rawContentLength,
       parallelQueries,
       engine: engineHeader,
+      format: formatHeader as 'json' | 'msgpack',
+      enriched: enrichedHeader,
     };
   },
 
@@ -414,10 +441,40 @@ export const optimApi = {
   },
 
   // Statut des optimisations
-  getStatus: async (engine?: EngineType) => {
+  getStatus: async (database?: string, engine?: EngineType) => {
     const params: Record<string, string> = {};
+    if (database) params.database = database;
     if (engine) params.engine = engine;
     const response = await api.get('/optim/status', { params });
+    return response.data;
+  },
+
+  // ── Covering Indexes ──
+
+  /** Vérifier si les covering indexes existent */
+  hasCoveringIndexes: async (database?: string, engine?: EngineType): Promise<{ coveringIndexes: boolean; database: string }> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.get('/optim/indexes/covering', { params });
+    return response.data;
+  },
+
+  /** Créer les covering indexes */
+  createCoveringIndexes: async (database?: string, engine?: EngineType): Promise<{ message: string }> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.post('/optim/indexes/covering', {}, { params });
+    return response.data;
+  },
+
+  /** Supprimer les covering indexes */
+  dropCoveringIndexes: async (database?: string, engine?: EngineType): Promise<{ message: string }> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    const response = await api.delete('/optim/indexes/covering', { params });
     return response.data;
   },
 };

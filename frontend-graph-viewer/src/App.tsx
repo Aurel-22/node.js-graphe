@@ -12,6 +12,8 @@ import { OptimPanel } from './components/OptimPanel';
 import GraphFormModal from './components/GraphFormModal';
 import ClassificationFilterPanel from './components/ClassificationFilterPanel';
 import LevelExplorer from './components/LevelExplorer';
+import CosmosViewer from './components/CosmosViewer';
+import SimulationPanel from './components/SimulationPanel';
 import { graphApi, databaseApi, engineApi, cmdbApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
@@ -19,7 +21,7 @@ import { useTheme } from './hooks/useTheme';
 import { useWebSocket, WsMessage } from './hooks/useWebSocket';
 import './App.css';
 
-type ViewerType = 'force-graph' | '3d' | 'sigma' | 'd3' | 'vis-network' | 'impact' | 'query' | 'algorithms' | 'explorer';
+type ViewerType = 'force-graph' | '3d' | 'sigma' | 'sigma-optim' | 'cosmos' | 'd3' | 'vis-network' | 'impact' | 'query' | 'algorithms' | 'explorer' | 'simulation';
 
 function App() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
@@ -143,7 +145,16 @@ function App() {
       setSelectedGraphTitle(selectedGraph?.title || '');
 
       const t0 = performance.now();
-      const result = await graphApi.getGraph(id, selectedDatabase, { nocache: true, engine: selectedEngine as any });
+      // Read optimization toggles from OptimPanel
+      const isSigmaOptim = viewerType === 'sigma-optim';
+      const optFormat = isSigmaOptim ? 'msgpack' as const : (window as any).__optimGetFormat?.();
+      const optEnrich = isSigmaOptim ? true : ((window as any).__optimGetEnrich?.() || false);
+      const result = await graphApi.getGraph(id, selectedDatabase, {
+        nocache: true,
+        engine: selectedEngine as any,
+        format: optFormat,
+        enrich: optEnrich,
+      });
       const elapsed = Math.round(performance.now() - t0);
 
       // Envoyer le résultat au panneau d'optimisations
@@ -334,6 +345,19 @@ function App() {
             >
               Sigma.js
             </button>
+            <button
+              className={viewerType === 'sigma-optim' ? 'active' : ''}
+              onClick={() => setViewerType('sigma-optim')}
+              title="Sigma.js + MessagePack + Enrichissement + Covering Indexes"
+            >
+              Sigma ⚡
+            </button>
+            <button
+              className={viewerType === 'cosmos' ? 'active' : ''}
+              onClick={() => setViewerType('cosmos')}
+            >
+              Cosmos (GPU)
+            </button>
             {/* G6 (AntV) — temporairement masqué
             <button
               className={viewerType === 'g6' ? 'active' : ''}
@@ -377,6 +401,13 @@ function App() {
               onClick={() => setViewerType('explorer')}
             >
               Explorer
+            </button>
+            <button
+              className={viewerType === 'simulation' ? 'active' : ''}
+              onClick={() => setViewerType('simulation')}
+              title="Compare toutes les combinaisons d'optimisations"
+            >
+              🧪 Simulation
             </button>
           </div>
         </div>
@@ -446,12 +477,12 @@ function App() {
               <ForceGraph3DViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
             )}
           </div>
-        ) : viewerType === 'sigma' ? (
+        ) : viewerType === 'sigma' || viewerType === 'sigma-optim' ? (
           <div className="graph-viewer-container">
             {graphLoading || valeoLoading ? (
               <div className="loading-state">
                 <div className="spinner"></div>
-                <p>{valeoLoading ? 'Chargement DATA_VALEO...' : 'Chargement du graphe...'}</p>
+                <p>{valeoLoading ? 'Chargement DATA_VALEO...' : viewerType === 'sigma-optim' ? 'Chargement optimisé (MsgPack + Enrichissement)...' : 'Chargement du graphe...'}</p>
               </div>
             ) : (
               <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
@@ -468,6 +499,17 @@ function App() {
                   setFilteredGraphData(null);
                 }}
               />
+            )}
+          </div>
+        ) : viewerType === 'cosmos' ? (
+          <div className="graph-viewer-container">
+            {graphLoading ? (
+              <div className="loading-state">
+                <div className="spinner"></div>
+                <p>Chargement du graphe (GPU)...</p>
+              </div>
+            ) : (
+              <CosmosViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} database={selectedDatabase || undefined} engine={selectedEngine || undefined} />
             )}
           </div>
         ) : viewerType === 'd3' ? (
@@ -544,6 +586,15 @@ function App() {
                 <p>🔎 Recherchez un CI pour commencer l'exploration</p>
               </div>
             )}
+          </div>
+        ) : viewerType === 'simulation' ? (
+          <div className="graph-viewer-container">
+            <SimulationPanel
+              graphId={selectedGraphId || undefined}
+              database={selectedDatabase || undefined}
+              engine={selectedEngine || undefined}
+              graphs={graphs}
+            />
           </div>
         ) : null}
       </div>

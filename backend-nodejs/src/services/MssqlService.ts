@@ -1,5 +1,8 @@
 import sql from "mssql";
 import NodeCache from "node-cache";
+import { appendFileSync, mkdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import {
   GraphNode,
   GraphEdge,
@@ -25,18 +28,34 @@ import { GraphDatabaseService } from "./GraphDatabaseService.js";
 export class MssqlService implements GraphDatabaseService {
   readonly engineName = "mssql";
 
-  // Base contenant les graphs pré-stockés (pour comparaison cross-DB)
-  private static readonly GRAPH_STORE_DB = "dev-11";
-  // DATA_VALEO : schéma EasyVista natif
-  private static readonly DATA_VALEO_DB = "DATA_VALEO";
-  private static readonly DATA_VALEO_SCHEMA = "50004";
-
   private baseConfig: sql.config;
   private pools = new Map<string, sql.ConnectionPool>();
 
   // Cache en mémoire (TTL 5 min)
   private graphCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
   private cacheStats = { hits: 0, misses: 0, bypasses: 0 };
+
+  // File logging
+  private static logFile = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../logs/sql-queries.log",
+  );
+  private static logInitialized = false;
+
+  static sqlLog(operation: string, database: string, details?: Record<string, unknown>): void {
+    if (!MssqlService.logInitialized) {
+      mkdirSync(dirname(MssqlService.logFile), { recursive: true });
+      MssqlService.logInitialized = true;
+    }
+    const ts = new Date().toISOString();
+    const parts = [`[${ts}] DB=${database} | ${operation}`];
+    if (details) {
+      for (const [k, v] of Object.entries(details)) {
+        if (v !== undefined && v !== null) parts.push(`${k}=${v}`);
+      }
+    }
+    appendFileSync(MssqlService.logFile, parts.join(" | ") + "\n");
+  }
 
   constructor(
     host: string,
@@ -64,14 +83,21 @@ export class MssqlService implements GraphDatabaseService {
     };
   }
 
+  private static readonly SYSTEM_DBS = new Set(["master", "tempdb", "model", "msdb"]);
+
   // ===== Connexion / Pool =====
 
   private async getPool(database?: string): Promise<sql.ConnectionPool> {
     const db = database || this.defaultDatabase;
     if (!this.pools.has(db)) {
+      MssqlService.sqlLog("POOL_CREATE", db, { info: "New connection pool" });
       const pool = new sql.ConnectionPool({ ...this.baseConfig, database: db });
       await pool.connect();
       this.pools.set(db, pool);
+      // Ensure graph tables exist for non-system databases
+      if (!MssqlService.SYSTEM_DBS.has(db)) {
+        await this.ensureTables(pool);
+      }
     }
     return this.pools.get(db)!;
   }
@@ -274,20 +300,22 @@ export class MssqlService implements GraphDatabaseService {
   async getGraph(graphId: string, database?: string, bypassCache = false): Promise<GraphData> {
     const db = database || this.defaultDatabase;
     const cacheKey = `graph:${db}:${graphId}`;
+    const t0 = performance.now();
 
     if (!bypassCache) {
       const cached = this.graphCache.get<GraphData>(cacheKey);
-      if (cached) { this.cacheStats.hits++; return cached; }
+      if (cached) {
+        this.cacheStats.hits++;
+        const dur = Math.round((performance.now() - t0) * 10) / 10;
+        MssqlService.sqlLog("getGraph", db, {
+          graphId, cache: "HIT", duration: `${dur}ms`,
+          nodes: cached.nodes.length, edges: cached.edges.length,
+        });
+        return cached;
+      }
       this.cacheStats.misses++;
     } else {
       this.cacheStats.bypasses++;
-    }
-
-    // ── DATA_VALEO : charger les mêmes graphes depuis les tables EasyVista ──
-    if (db === MssqlService.DATA_VALEO_DB) {
-      const result = await this.getGraphFromValeo(graphId);
-      if (!bypassCache) this.graphCache.set(cacheKey, result);
-      return result;
     }
 
     const pool = await this.getPool(db);
@@ -320,161 +348,30 @@ export class MssqlService implements GraphDatabaseService {
 
     const result: GraphData = { nodes, edges };
     if (!bypassCache) this.graphCache.set(cacheKey, result);
+
+    const duration = Math.round((performance.now() - t0) * 10) / 10;
+    MssqlService.sqlLog("getGraph", db, {
+      graphId,
+      cache: bypassCache ? "BYPASS" : "MISS",
+      nodes: nodes.length,
+      edges: edges.length,
+      duration: `${duration}ms`,
+    });
+
     return result;
-  }
-
-  /**
-   * Charge un graphe depuis les tables EasyVista natives (DATA_VALEO).
-   * 1. Lit les node_id depuis [dev-11].dbo.graph_nodes (cross-DB) pour connaître les asset_ids
-   * 2. Lit les edges depuis [dev-11].dbo.graph_edges (cross-DB) pour connaître la structure
-   * 3. Pour chaque nœud, requête AM_ASSET + classification pour récupérer les infos live
-   * 4. Pour chaque arête, requête CONFIGURATION_ITEM_LINK + AM_REFERENCE pour le label
-   */
-  private async getGraphFromValeo(graphId: string): Promise<GraphData> {
-    const pool = await this.getPool(MssqlService.DATA_VALEO_DB);
-    const storeDb = MssqlService.GRAPH_STORE_DB;
-    const schema = MssqlService.DATA_VALEO_SCHEMA;
-    const dvDb = MssqlService.DATA_VALEO_DB;
-
-    // 1. Lire la liste des node_id depuis dev-11 (cross-database)
-    const nodeListRes = await pool.request()
-      .input("graphId", sql.NVarChar(255), graphId)
-      .query(`SELECT node_id FROM [${storeDb}].dbo.graph_nodes WHERE graph_id = @graphId`);
-
-    const nodeIds: string[] = nodeListRes.recordset.map((r: any) => r.node_id);
-    if (nodeIds.length === 0) return { nodes: [], edges: [] };
-
-    // Extraire les asset_ids (format CI_12345 → 12345)
-    const assetIds = nodeIds
-      .filter((id: string) => id.startsWith("CI_"))
-      .map((id: string) => parseInt(id.replace("CI_", ""), 10))
-      .filter((n: number) => !isNaN(n));
-
-    if (assetIds.length === 0) return { nodes: [], edges: [] };
-
-    // 2. Requêter les infos nœuds depuis les tables EasyVista (AM_ASSET + classification)
-    const ID_BATCH = 1000;
-    let batchSql = `CREATE TABLE #asset_ids (asset_id INT PRIMARY KEY);\n`;
-    for (let i = 0; i < assetIds.length; i += ID_BATCH) {
-      const batch = assetIds.slice(i, i + ID_BATCH);
-      batchSql += `INSERT INTO #asset_ids (asset_id) VALUES ${batch.map((id: number) => `(${id})`).join(",")};\n`;
-    }
-    batchSql += `
-      SELECT
-        a.ASSET_ID       AS asset_id,
-        a.NETWORK_IDENTIFIER AS nom,
-        a.ASSET_TAG      AS nDeCI,
-        a.IS_SERVICE     AS estUnService,
-        a.CI_VERSION     AS version,
-        uc.UN_CLASSIFICATION_ID AS type_id,
-        uc.UN_CLASSIFICATION_FR AS type_label,
-        uc.[LEVEL] AS classification_level,
-        parent_uc.UN_CLASSIFICATION_ID AS family_id,
-        parent_uc.UN_CLASSIFICATION_FR AS family_label
-      FROM #asset_ids ai
-      INNER JOIN [${dvDb}].[${schema}].AM_ASSET a ON a.ASSET_ID = ai.asset_id
-      LEFT JOIN [${dvDb}].[${schema}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
-      LEFT JOIN [${dvDb}].[${schema}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
-      LEFT JOIN [${dvDb}].[${schema}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID;
-
-      -- Arêtes : lire les paires source/target depuis dev-11, puis enrichir
-      -- depuis CONFIGURATION_ITEM_LINK pour les labels/propriétés live EasyVista.
-      -- On ne prend que les relations correspondant aux arêtes stockées (pas toutes
-      -- les relations possibles entre les nœuds, qui seraient 1M+).
-      SELECT
-        e.id,
-        e.source_id,
-        e.target_id,
-        COALESCE(r.REFERENCE_FR COLLATE DATABASE_DEFAULT, e.label) AS label,
-        COALESCE(r.REFERENCE_FR COLLATE DATABASE_DEFAULT, e.edge_type) AS edge_type,
-        l.RELATION_TYPE_ID,
-        l.BLOCKING
-      FROM [${storeDb}].dbo.graph_edges e
-      LEFT JOIN [${dvDb}].[${schema}].CONFIGURATION_ITEM_LINK l
-        ON l.PARENT_CI_ID = CAST(REPLACE(e.source_id, 'CI_', '') AS INT)
-       AND l.CHILD_CI_ID  = CAST(REPLACE(e.target_id, 'CI_', '') AS INT)
-      LEFT JOIN [${dvDb}].[${schema}].AM_REFERENCE r
-        ON r.REFERENCE_ID = l.RELATION_TYPE_ID
-      WHERE e.graph_id = @graphId;
-
-      DROP TABLE #asset_ids;
-    `;
-
-    const batchResult = await pool.request()
-      .input("graphId", sql.NVarChar(255), graphId)
-      .query(batchSql);
-
-    const recordsets = batchResult.recordsets as any[];
-    const ciRows = recordsets[0] || [];
-    const edgeRows = recordsets[1] || [];
-
-    // 3. Transformer en GraphData
-    const nodes: GraphNode[] = ciRows.map((ci: any) => ({
-      id: `CI_${ci.asset_id}`,
-      label: ci.nom || ci.nDeCI || `CI_${ci.asset_id}`,
-      node_type: ci.type_label || "CI",
-      properties: {
-        asset_id: ci.asset_id,
-        nom: ci.nom,
-        nDeCI: ci.nDeCI,
-        type_id: ci.type_id || null,
-        type_label: ci.type_label || null,
-        family_id: ci.family_id || null,
-        family_label: ci.family_label || null,
-        classification_level: ci.classification_level || null,
-        version: ci.version,
-        estUnService: ci.estUnService,
-      },
-    }));
-
-    const edges: GraphEdge[] = edgeRows.map((r: any) => ({
-      id: String(r.id),
-      source: r.source_id,
-      target: r.target_id,
-      label: r.label || undefined,
-      edge_type: r.edge_type || "relation",
-      properties: {
-        relation_type_id: r.RELATION_TYPE_ID || null,
-        blocking: r.BLOCKING || null,
-      },
-    }));
-
-    return { nodes, edges };
   }
 
   async listGraphs(database?: string): Promise<GraphSummary[]> {
     const db = database || this.defaultDatabase;
+    const t0 = performance.now();
     const pool = await this.getPool(db);
-
-    // Pour DATA_VALEO : pas de table graphs locale → lister via cross-DB depuis dev-11
-    if (db === MssqlService.DATA_VALEO_DB) {
-      try {
-        const storeDb = MssqlService.GRAPH_STORE_DB;
-        const res = await pool.request().query(`
-          SELECT id, title, description, graph_type, node_count, edge_count
-          FROM [${storeDb}].dbo.graphs
-          ORDER BY created_at DESC
-        `);
-        return res.recordset.map((r: any) => ({
-          id: r.id,
-          title: `⚡ ${r.title}`,
-          description: r.description,
-          graph_type: r.graph_type,
-          node_count: r.node_count,
-          edge_count: r.edge_count,
-        }));
-      } catch (err) {
-        console.warn("Cross-DB listGraphs from dev-11 failed:", err);
-        return [];
-      }
-    }
 
     const res = await pool.request().query(`
       SELECT id, title, description, graph_type, node_count, edge_count
       FROM graphs
       ORDER BY created_at DESC
     `);
-    return res.recordset.map((r: any) => ({
+    const graphs = res.recordset.map((r: any) => ({
       id: r.id,
       title: r.title,
       description: r.description,
@@ -482,6 +379,14 @@ export class MssqlService implements GraphDatabaseService {
       node_count: r.node_count,
       edge_count: r.edge_count,
     }));
+
+    const duration = Math.round((performance.now() - t0) * 10) / 10;
+    MssqlService.sqlLog("listGraphs", db, {
+      count: graphs.length,
+      duration: `${duration}ms`,
+    });
+
+    return graphs;
   }
 
   async getGraphStats(graphId: string, database?: string): Promise<GraphStats> {
@@ -849,5 +754,150 @@ export class MssqlService implements GraphDatabaseService {
         CREATE INDEX IX_ge_gid_${Date.now()} ON graph_edges (graph_id)
       END
     `);
+  }
+
+  // ===== Covering Indexes =====
+
+  /** Crée les covering indexes pour accélérer les SELECT de getGraph */
+  async createCoveringIndexes(database?: string): Promise<{ created: string[] }> {
+    const pool = await this.getPool(database);
+    const created: string[] = [];
+    const indexes = [
+      {
+        name: "IX_graph_nodes_covering",
+        sql: `CREATE NONCLUSTERED INDEX IX_graph_nodes_covering
+              ON graph_nodes (graph_id)
+              INCLUDE (node_id, label, node_type, properties)`,
+      },
+      {
+        name: "IX_graph_edges_covering",
+        sql: `CREATE NONCLUSTERED INDEX IX_graph_edges_covering
+              ON graph_edges (graph_id)
+              INCLUDE (id, source_id, target_id, label, edge_type, properties)`,
+      },
+    ];
+    for (const idx of indexes) {
+      const exists = await pool.request().query(`
+        SELECT 1 FROM sys.indexes WHERE name = '${idx.name}'
+      `);
+      if (exists.recordset.length === 0) {
+        await pool.request().query(idx.sql);
+        created.push(idx.name);
+      }
+    }
+    return { created };
+  }
+
+  /** Supprime les covering indexes */
+  async dropCoveringIndexes(database?: string): Promise<{ dropped: string[] }> {
+    const pool = await this.getPool(database);
+    const dropped: string[] = [];
+    const indexes = [
+      { name: "IX_graph_nodes_covering", table: "graph_nodes" },
+      { name: "IX_graph_edges_covering", table: "graph_edges" },
+    ];
+    for (const idx of indexes) {
+      const exists = await pool.request().query(`
+        SELECT 1 FROM sys.indexes WHERE name = '${idx.name}'
+      `);
+      if (exists.recordset.length > 0) {
+        await pool.request().query(`DROP INDEX ${idx.name} ON ${idx.table}`);
+        dropped.push(idx.name);
+      }
+    }
+    return { dropped };
+  }
+
+  /** Vérifie si les covering indexes existent */
+  async hasCoveringIndexes(database?: string): Promise<boolean> {
+    const pool = await this.getPool(database);
+    const res = await pool.request().query(`
+      SELECT COUNT(*) AS cnt FROM sys.indexes
+      WHERE name IN ('IX_graph_nodes_covering', 'IX_graph_edges_covering')
+    `);
+    return res.recordset[0].cnt === 2;
+  }
+
+  // ===== Live Enrichment (EasyVista) =====
+
+  private static readonly EASYVISTA_SCHEMA = "50004";
+
+  /**
+   * Enrichit un GraphData avec les données live EasyVista.
+   * Lit les nœuds CI_xxx du graphe et requête AM_ASSET + classification
+   * pour mettre à jour label, node_type et properties avec les infos live.
+   */
+  async enrichGraphFromEasyVista(graphData: GraphData, database?: string): Promise<GraphData> {
+    // Extraire les asset_ids (format CI_12345 → 12345)
+    const assetMap = new Map<number, GraphNode>();
+    for (const node of graphData.nodes) {
+      if (node.id.startsWith("CI_")) {
+        const assetId = parseInt(node.id.replace("CI_", ""), 10);
+        if (!isNaN(assetId)) assetMap.set(assetId, node);
+      }
+    }
+    if (assetMap.size === 0) return graphData;
+
+    const pool = await this.getPool(database);
+    const schema = MssqlService.EASYVISTA_SCHEMA;
+    const assetIds = Array.from(assetMap.keys());
+
+    // Batch insert into temp table then JOIN
+    const ID_BATCH = 1000;
+    let batchSql = `CREATE TABLE #enrich_ids (asset_id INT PRIMARY KEY);\n`;
+    for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+      const batch = assetIds.slice(i, i + ID_BATCH);
+      batchSql += `INSERT INTO #enrich_ids (asset_id) VALUES ${batch.map(id => `(${id})`).join(",")};\n`;
+    }
+    batchSql += `
+      SELECT
+        a.ASSET_ID       AS asset_id,
+        a.NETWORK_IDENTIFIER AS nom,
+        a.ASSET_TAG      AS nDeCI,
+        a.IS_SERVICE     AS estUnService,
+        a.CI_VERSION     AS version,
+        uc.UN_CLASSIFICATION_ID AS type_id,
+        uc.UN_CLASSIFICATION_FR AS type_label,
+        uc.[LEVEL] AS classification_level,
+        parent_uc.UN_CLASSIFICATION_ID AS family_id,
+        parent_uc.UN_CLASSIFICATION_FR AS family_label
+      FROM #enrich_ids ai
+      INNER JOIN [${schema}].AM_ASSET a ON a.ASSET_ID = ai.asset_id
+      LEFT JOIN [${schema}].AM_CATALOG cat ON a.CATALOG_ID = cat.CATALOG_ID
+      LEFT JOIN [${schema}].AM_UN_CLASSIFICATION uc ON cat.UN_CLASSIFICATION_ID = uc.UN_CLASSIFICATION_ID
+      LEFT JOIN [${schema}].AM_UN_CLASSIFICATION parent_uc ON uc.PARENT_UN_CLASSIFICATION_ID = parent_uc.UN_CLASSIFICATION_ID;
+      DROP TABLE #enrich_ids;
+    `;
+
+    try {
+      const result = await pool.request().query(batchSql);
+      const ciRows = (result.recordsets as any[])[0] || [];
+
+      for (const ci of ciRows as any[]) {
+        const node = assetMap.get(ci.asset_id);
+        if (!node) continue;
+        node.label = ci.nom || ci.nDeCI || node.label;
+        node.node_type = ci.type_label || node.node_type;
+        node.properties = {
+          ...node.properties,
+          asset_id: ci.asset_id,
+          nom: ci.nom,
+          nDeCI: ci.nDeCI,
+          type_id: ci.type_id || null,
+          type_label: ci.type_label || null,
+          family_id: ci.family_id || null,
+          family_label: ci.family_label || null,
+          classification_level: ci.classification_level || null,
+          version: ci.version,
+          estUnService: ci.estUnService,
+          _enriched: true,
+          _enriched_at: new Date().toISOString(),
+        };
+      }
+    } catch (err) {
+      console.warn("EasyVista enrichment failed (tables may not exist in this DB):", (err as Error).message);
+    }
+
+    return graphData;
   }
 }
