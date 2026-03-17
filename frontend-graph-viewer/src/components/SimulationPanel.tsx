@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { graphApi, optimApi, GraphLoadResult } from '../services/api';
+import { graphApi, optimApi, GraphLoadResult, Database } from '../services/api';
 import { GraphSummary } from '../types/graph';
 import Graph from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
@@ -11,6 +11,7 @@ interface SimulationPanelProps {
   database?: string;
   engine?: string;
   graphs?: GraphSummary[];
+  databases?: Database[];
 }
 
 interface ComboResult {
@@ -53,9 +54,12 @@ interface ComboSpec {
   format: 'json' | 'msgpack';
   enrich: boolean;
   nocompress: boolean;
+  compress?: 'gzip' | 'brotli';
+  forjson?: boolean;
+  stream?: boolean;
 }
 
-function buildCombos(includeCompression: boolean): ComboSpec[] {
+function buildCombos(includeCompression: boolean, includeForJson: boolean, includeStream: boolean): ComboSpec[] {
   const base: Array<{ label: string; nocache: boolean; format: 'json' | 'msgpack'; enrich: boolean }> = [
     // Avec cache
     { label: 'Cache + JSON',                  nocache: false, format: 'json',    enrich: false },
@@ -68,19 +72,35 @@ function buildCombos(includeCompression: boolean): ComboSpec[] {
     { label: 'SQL + MsgPack',                 nocache: true,  format: 'msgpack', enrich: false },
     { label: 'SQL + MsgPack + Enrich',        nocache: true,  format: 'msgpack', enrich: true  },
   ];
+
+  let combos: ComboSpec[];
   if (!includeCompression) {
-    return base.map(c => ({ ...c, nocompress: false }));
+    combos = base.map(c => ({ ...c, nocompress: false }));
+  } else {
+    // Triple: Gzip + Brotli + brut
+    combos = [];
+    for (const c of base) {
+      combos.push({ ...c, nocompress: false, compress: 'gzip', label: c.label + ' + Gzip' });
+      combos.push({ ...c, nocompress: false, compress: 'brotli', label: c.label + ' + Brotli' });
+      combos.push({ ...c, nocompress: true, label: c.label + ' (brut)' });
+    }
   }
-  // Double: with gzip (default) + without gzip
-  const combos: ComboSpec[] = [];
-  for (const c of base) {
-    combos.push({ ...c, nocompress: false, label: c.label + ' + Gzip' });
-    combos.push({ ...c, nocompress: true, label: c.label + ' (brut)' });
+
+  // FOR JSON PATH combos (SQL-only, JSON format only)
+  if (includeForJson) {
+    combos.push({ label: 'FOR JSON PATH', nocache: true, format: 'json', enrich: false, nocompress: false, forjson: true });
+    combos.push({ label: 'FOR JSON PATH + Enrich', nocache: true, format: 'json', enrich: true, nocompress: false, forjson: true });
   }
+
+  // Streaming HTTP combos (SQL-only, JSON format only)
+  if (includeStream) {
+    combos.push({ label: 'Streaming HTTP', nocache: true, format: 'json', enrich: false, nocompress: false, stream: true });
+  }
+
   return combos;
 }
 
-const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, engine, graphs = [] }) => {
+const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, engine, graphs = [], databases = [] }) => {
   const [iterations, setIterations] = useState(5);
   const [results, setResults] = useState<ComboResult[]>([]);
   const [running, setRunning] = useState(false);
@@ -97,13 +117,21 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
   const [cosmosResults, setCosmosResults] = useState<CosmosResult[]>([]);
   const [multiGraph, setMultiGraph] = useState(false);
   const [selectedGraphIds, setSelectedGraphIds] = useState<string[]>([]);
+  const [testMultiDatabase, setTestMultiDatabase] = useState(false);
+  const [selectedDatabases, setSelectedDatabases] = useState<string[]>([]);
+  const [testForJson, setTestForJson] = useState(false);
+  const [testStream, setTestStream] = useState(false);
 
-  const combos = useMemo(() => buildCombos(testCompression), [testCompression]);
-  const comboCount = combos.length + (testCovering ? (testCompression ? 8 : 4) : 0);
+  const combos = useMemo(() => buildCombos(testCompression, testForJson, testStream), [testCompression, testForJson, testStream]);
+  const sqlComboCount = combos.filter(c => c.nocache).length;
+  const comboCount = combos.length + (testCovering ? sqlComboCount : 0);
   const graphsToTest = multiGraph && selectedGraphIds.length > 0
     ? selectedGraphIds
     : graphId ? [graphId] : [];
-  const totalCalls = comboCount * iterations * graphsToTest.length;
+  const databasesToTest = testMultiDatabase && selectedDatabases.length > 0
+    ? selectedDatabases
+    : database ? [database] : ['default'];
+  const totalCalls = comboCount * iterations * graphsToTest.length * databasesToTest.length;
 
   // Yield to browser so React can render progress & page stays responsive
   const yieldToBrowser = () => new Promise<void>(r => setTimeout(r, 0));
@@ -133,74 +161,43 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         return g ? `${g.title} (${g.node_count}n/${g.edge_count}e)` : gid;
       };
 
-      for (let gi = 0; gi < graphsToTest.length; gi++) {
-        const gid = graphsToTest[gi];
-        const gName = graphsToTest.length > 1 ? graphLabel(gid) : undefined;
+      const multiDb = databasesToTest.length > 1;
+      const totalCombosPerDb = combos.length * graphsToTest.length;
+      let globalStep = 0;
 
-        // Warm up cache
-        setProgress(`${gName ? gName + ' — ' : ''}Préchauffage du cache…`);
-        await graphApi.getGraph(gid, database, { nocache: true, engine: engine as any });
+      for (let di = 0; di < databasesToTest.length; di++) {
+        const db = databasesToTest[di];
+        const dbTag = multiDb ? `[${db}]` : undefined;
 
-        for (let c = 0; c < combos.length; c++) {
-          const combo = combos[c];
-          const label = gName ? `${gName} | ${combo.label}` : combo.label;
-          setProgress(`${gi * combos.length + c + 1}/${combos.length * graphsToTest.length} — ${combo.label} (0/${iterations})`);
+        for (let gi = 0; gi < graphsToTest.length; gi++) {
+          const gid = graphsToTest[gi];
+          const gName = graphsToTest.length > 1 ? graphLabel(gid) : undefined;
+          const prefix = [dbTag, gName].filter(Boolean).join(' ');
 
-          const times: number[] = [];
-          let lastResult: GraphLoadResult | null = null;
+          // Warm up cache
+          setProgress(`${prefix ? prefix + ' — ' : ''}Préchauffage du cache…`);
+          await graphApi.getGraph(gid, db, { nocache: true, engine: engine as any });
 
-          for (let i = 0; i < iterations; i++) {
-            setProgress(`${gi * combos.length + c + 1}/${combos.length * graphsToTest.length} — ${combo.label} (${i + 1}/${iterations})`);
-            await yieldToBrowser();
-            const result = await graphApi.getGraph(gid, database, {
-              nocache: combo.nocache,
-              format: combo.format,
-              enrich: combo.enrich,
-              nocompress: combo.nocompress,
-              engine: engine as any,
-            });
-            times.push(result.timeMs);
-            lastResult = result;
-          }
-
-          const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
-          allResults.push({
-            label,
-            options: { nocache: combo.nocache, format: combo.format, enrich: combo.enrich, nocompress: combo.nocompress },
-            times,
-            avg,
-            min: Math.min(...times),
-            max: Math.max(...times),
-            sizeKb: lastResult?.rawContentLength ? Math.round(lastResult.rawContentLength / 1024 * 10) / 10 : null,
-            compressedKb: lastResult?.contentLength ? Math.round(lastResult.contentLength / 1024 * 10) / 10 : null,
-            cacheStatus: lastResult?.cacheStatus ?? 'unknown',
-            graphLabel: gName,
-          });
-        }
-
-        // Covering index test for this graph
-        if (testCovering && !hasIndexes) {
-          setProgress('Création des covering indexes…');
-          await optimApi.createCoveringIndexes(database);
-
-          const sqlCombos = combos.filter(c => c.nocache);
-          for (let c = 0; c < sqlCombos.length; c++) {
-            const combo = sqlCombos[c];
-            const label = gName ? `${gName} | ${combo.label} + CovIdx` : `${combo.label} + CovIdx`;
-            setProgress(`Covering indexes — ${combo.label} (0/${iterations})`);
-
-            await optimApi.clearCache();
+          for (let c = 0; c < combos.length; c++) {
+            const combo = combos[c];
+            globalStep++;
+            const label = prefix ? `${prefix} | ${combo.label}` : combo.label;
+            setProgress(`${globalStep}/${totalCombosPerDb * databasesToTest.length} — ${combo.label} (0/${iterations})`);
 
             const times: number[] = [];
             let lastResult: GraphLoadResult | null = null;
+
             for (let i = 0; i < iterations; i++) {
-              setProgress(`Covering indexes — ${combo.label} (${i + 1}/${iterations})`);
+              setProgress(`${globalStep}/${totalCombosPerDb * databasesToTest.length} — ${combo.label} (${i + 1}/${iterations})`);
               await yieldToBrowser();
-              const result = await graphApi.getGraph(gid, database, {
-                nocache: true,
+              const result = await graphApi.getGraph(gid, db, {
+                nocache: combo.nocache,
                 format: combo.format,
                 enrich: combo.enrich,
                 nocompress: combo.nocompress,
+                compress: combo.compress,
+                forjson: combo.forjson,
+                stream: combo.stream,
                 engine: engine as any,
               });
               times.push(result.timeMs);
@@ -210,7 +207,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
             allResults.push({
               label,
-              options: { nocache: true, format: combo.format, enrich: combo.enrich, nocompress: combo.nocompress },
+              options: { nocache: combo.nocache, format: combo.format, enrich: combo.enrich, nocompress: combo.nocompress },
               times,
               avg,
               min: Math.min(...times),
@@ -222,8 +219,56 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             });
           }
 
-          setProgress('Suppression des covering indexes…');
-          await optimApi.dropCoveringIndexes(database);
+          // Covering index test for this graph on this database
+          if (testCovering && !hasIndexes) {
+            setProgress('Création des covering indexes…');
+            await optimApi.createCoveringIndexes(db);
+
+            const sqlCombos = combos.filter(c => c.nocache);
+            for (let c = 0; c < sqlCombos.length; c++) {
+              const combo = sqlCombos[c];
+              const label = prefix ? `${prefix} | ${combo.label} + CovIdx` : `${combo.label} + CovIdx`;
+              setProgress(`Covering indexes — ${combo.label} (0/${iterations})`);
+
+              await optimApi.clearCache();
+
+              const times: number[] = [];
+              let lastResult: GraphLoadResult | null = null;
+              for (let i = 0; i < iterations; i++) {
+                setProgress(`Covering indexes — ${combo.label} (${i + 1}/${iterations})`);
+                await yieldToBrowser();
+                const result = await graphApi.getGraph(gid, db, {
+                  nocache: true,
+                  format: combo.format,
+                  enrich: combo.enrich,
+                  nocompress: combo.nocompress,
+                  compress: combo.compress,
+                  forjson: combo.forjson,
+                  stream: combo.stream,
+                  engine: engine as any,
+                });
+                times.push(result.timeMs);
+                lastResult = result;
+              }
+
+              const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+              allResults.push({
+                label,
+                options: { nocache: true, format: combo.format, enrich: combo.enrich, nocompress: combo.nocompress },
+                times,
+                avg,
+                min: Math.min(...times),
+                max: Math.max(...times),
+                sizeKb: lastResult?.rawContentLength ? Math.round(lastResult.rawContentLength / 1024 * 10) / 10 : null,
+                compressedKb: lastResult?.contentLength ? Math.round(lastResult.contentLength / 1024 * 10) / 10 : null,
+                cacheStatus: lastResult?.cacheStatus ?? 'unknown',
+                graphLabel: gName,
+              });
+            }
+
+            setProgress('Suppression des covering indexes…');
+            await optimApi.dropCoveringIndexes(db);
+          }
         }
       }
 
@@ -424,10 +469,48 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             <span className="simulation-value">{graphId ? <code>{graphId}</code> : <em>Aucun sélectionné</em>}</span>
           </div>
         )}
+
+        {/* Multi-database selection */}
         <div className="simulation-config-row">
-          <label>Base :</label>
-          <span className="simulation-value"><code>{database ?? 'default'}</code></span>
+          <label className="simulation-checkbox">
+            <input
+              type="checkbox"
+              checked={testMultiDatabase}
+              onChange={(e) => setTestMultiDatabase(e.target.checked)}
+              disabled={running}
+            />
+            Multi-base
+            <small>(comparer plusieurs bases de données — double le temps)</small>
+          </label>
         </div>
+        {testMultiDatabase && databases.length > 0 && (
+          <div className="simulation-graph-select">
+            {databases.map(db => (
+              <label key={db.name} className="simulation-graph-option">
+                <input
+                  type="checkbox"
+                  checked={selectedDatabases.includes(db.name)}
+                  onChange={(e) => {
+                    setSelectedDatabases(prev =>
+                      e.target.checked
+                        ? [...prev, db.name]
+                        : prev.filter(n => n !== db.name)
+                    );
+                  }}
+                  disabled={running}
+                />
+                <span className="graph-option-title">{db.name}</span>
+                <span className="graph-option-meta">{db.default ? '(défaut)' : ''} {db.status}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        {!testMultiDatabase && (
+          <div className="simulation-config-row">
+            <label>Base :</label>
+            <span className="simulation-value"><code>{database ?? 'default'}</code></span>
+          </div>
+        )}
         <div className="simulation-config-row">
           <label>Itérations par combo :</label>
           <input
@@ -448,8 +531,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestCompression(e.target.checked)}
               disabled={running}
             />
-            Tester Gzip (avec/sans compression)
-            <small>(double le nombre de combos)</small>
+            Tester compression (Gzip vs Brotli vs brut)
+            <small>(triple le nombre de combos)</small>
           </label>
           <label className="simulation-checkbox">
             <input
@@ -481,6 +564,26 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             Tester rendu Cosmos (GPU)
             <small>(temps de préparation données)</small>
           </label>
+          <label className="simulation-checkbox">
+            <input
+              type="checkbox"
+              checked={testForJson}
+              onChange={(e) => setTestForJson(e.target.checked)}
+              disabled={running}
+            />
+            Tester FOR JSON PATH SQL
+            <small>(JSON construit côté SQL Server)</small>
+          </label>
+          <label className="simulation-checkbox">
+            <input
+              type="checkbox"
+              checked={testStream}
+              onChange={(e) => setTestStream(e.target.checked)}
+              disabled={running}
+            />
+            Tester Streaming HTTP
+            <small>(Transfer-Encoding: chunked)</small>
+          </label>
         </div>
         {testBarnesHut && (
           <div className="simulation-config-row">
@@ -500,6 +603,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         <div className="simulation-combos-info">
           <strong>{comboCount} combinaisons</strong> × {iterations} itérations
           × {graphsToTest.length} graphe{graphsToTest.length > 1 ? 's' : ''}
+          × {databasesToTest.length} base{databasesToTest.length > 1 ? 's' : ''}
           = <strong>{totalCalls} appels API</strong>
           {testBarnesHut && (
             <span> + <strong>2 layouts</strong> × {iterations} passes</span>

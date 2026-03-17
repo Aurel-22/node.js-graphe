@@ -13,6 +13,7 @@ import { nodePositionCache } from '../services/nodePositionCache';
 interface SigmaGraphViewerProps {
   data: GraphData | null;
   graphId?: string;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -626,7 +627,7 @@ interface BenchmarkResult {
   rawLayoutMs: number;
 }
 
-const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) => {
+const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRenderComplete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const graphRef = useRef<Graph | null>(null);
@@ -1084,6 +1085,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
   useEffect(() => {
     if (!containerRef.current || !data) return;
     const startTime = performance.now();
+    performance.mark('Sigma:start');
     setRenderTime(null);
 
     if (sigmaRef.current) {
@@ -1275,6 +1277,9 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
 
     // Measure synchronous setup time (without actual WebGL render)
     const syncEnd = performance.now();
+    performance.mark('Sigma:syncReady');
+    performance.measure('Sigma:graphBuild', { start: startTime, end: startTime + (tLayoutStart - tBuildStart) });
+    performance.measure('Sigma:layout', { start: startTime + (tLayoutStart - tBuildStart), end: startTime + (tLayoutEnd - tBuildStart) });
     const syncTimingDetails = {
       graphBuild: tLayoutStart - tBuildStart,
       layout: tLayoutEnd - tLayoutStart,
@@ -1286,10 +1291,14 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId }) =>
     // Wait for Sigma's first actual WebGL render to measure real display time
     const onFirstRender = () => {
       const totalTime = performance.now() - startTime;
+      performance.mark('Sigma:rendered');
+      performance.measure('Sigma:webglRender', 'Sigma:syncReady', 'Sigma:rendered');
+      performance.measure('Sigma:total', 'Sigma:start', 'Sigma:rendered');
       syncTimingDetails.webglRender = totalTime - (syncEnd - startTime);
       setRenderTime(totalTime);
       setTimingDetails({ ...syncTimingDetails });
       sigma.off('afterRender', onFirstRender);
+      onRenderComplete?.(totalTime);
     };
     sigma.on('afterRender', onFirstRender);
 

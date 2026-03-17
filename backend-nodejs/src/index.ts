@@ -20,12 +20,18 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  exposedHeaders: ['X-Cache', 'X-Response-Time', 'X-Parallel-Queries', 'X-Content-Length-Raw', 'Content-Length', 'X-Engine'],
+  exposedHeaders: ['X-Cache', 'X-Response-Time', 'X-Parallel-Queries', 'X-Content-Length-Raw', 'Content-Length', 'X-Engine', 'X-Compression', 'X-Brotli-Size'],
 }));
-// Gzip compression — skipped if client sends ?nocompress=true (for benchmarking)
+// Gzip compression — active by default for all responses
+// Also compresses MsgPack (application/x-msgpack) which the default filter ignores
+// Skipped if: ?nocompress=true (benchmarking) or ?compress=brotli (route-level Brotli)
 app.use(compression({
   filter: (req, res) => {
     if (req.query.nocompress === 'true') return false;
+    if (req.query.compress === 'brotli') return false;
+    // Force compression for MsgPack too
+    const contentType = res.getHeader('Content-Type');
+    if (contentType && String(contentType).includes('msgpack')) return true;
     return compression.filter(req, res);
   },
   level: 6,
@@ -49,6 +55,18 @@ const mssqlService = new MssqlService(
 );
 await mssqlService.initialize();
 logger.info("MSSQL engine initialized");
+
+// Auto-create covering indexes on startup (biggest perf gain: -50%)
+try {
+  const { created } = await mssqlService.createCoveringIndexes();
+  if (created.length > 0) {
+    logger.info({ created }, "Covering indexes created on default database");
+  } else {
+    logger.info("Covering indexes already exist on default database");
+  }
+} catch (err) {
+  logger.warn({ err }, "Could not auto-create covering indexes (non-blocking)");
+}
 
 const dbService: GraphDatabaseService = mssqlService;
 

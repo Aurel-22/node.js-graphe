@@ -9,6 +9,7 @@ import './VisNetworkViewer.css';
 interface VisNetworkViewerProps {
   data: GraphData | null;
   graphId?: string;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
 // Adaptive presets based on graph size
@@ -78,7 +79,7 @@ const SOLVER_LABELS: Record<SolverType, string> = {
   hierarchicalRepulsion: '📊 Hierarchical',
 };
 
-const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId }) => {
+const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId, onRenderComplete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
   const [renderTime, setRenderTime] = useState<number>(0);
@@ -145,6 +146,7 @@ const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId }) =>
 
     startTimeRef.current = performance.now();
     const t0 = performance.now();
+    performance.mark('VisNetwork:start');
 
     const nc = data.nodes.length;
 
@@ -209,6 +211,8 @@ const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId }) =>
     );
 
     const t1 = performance.now(); // End data transform
+    performance.mark('VisNetwork:dataReady');
+    performance.measure('VisNetwork:dataTransform', 'VisNetwork:start', 'VisNetwork:dataReady');
     dataTransformTimeRef.current = t1 - t0;
 
     // Physics config based on solver
@@ -311,6 +315,9 @@ const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId }) =>
     // Stabilization done
     network.on('stabilizationIterationsDone', () => {
       const t3 = performance.now();
+      performance.mark('VisNetwork:rendered');
+      performance.measure('VisNetwork:layout', 'VisNetwork:dataReady', 'VisNetwork:rendered');
+      performance.measure('VisNetwork:total', 'VisNetwork:start', 'VisNetwork:rendered');
       setStabilizing(false);
       setStabilizationProgress(100);
       network.fit({ animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
@@ -322,6 +329,7 @@ const VisNetworkViewer: React.FC<VisNetworkViewerProps> = ({ data, graphId }) =>
         networkInit: networkInitTimeRef.current,
         stabilization: t3 - t2,
       });
+      onRenderComplete?.(total);
     });
 
     // Hover events

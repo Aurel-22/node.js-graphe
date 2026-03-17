@@ -1,9 +1,13 @@
 import { Router } from "express";
 import { encode } from "@msgpack/msgpack";
+import { brotliCompress, constants as zlibConstants } from "zlib";
+import { promisify } from "util";
 import { GraphDatabaseService } from "../services/GraphDatabaseService.js";
 import { MssqlService } from "../services/MssqlService.js";
 import { MermaidParser } from "../services/MermaidParser.js";
 import { CreateGraphRequest } from "../models/graph.js";
+
+const brotliCompressAsync = promisify(brotliCompress);
 
 export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Record<string, any>) => void) {
   const router = Router();
@@ -29,13 +33,48 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
 
   // Get a specific graph
   // Options: ?format=msgpack (binary), ?enrich=true (live EasyVista data), ?nocache=true
+  // Optim flags: ?forjson=true (SQL FOR JSON PATH), ?stream=true (chunked NDJSON)
   router.get("/graphs/:id", async (req, res, next) => {
     const database = req.query.database as string | undefined;
     try {
       const bypassCache = req.query.nocache === "true";
       const format = req.query.format as string | undefined;
       const enrich = req.query.enrich === "true";
+      const useForJson = req.query.forjson === "true";
+      const useStream = req.query.stream === "true";
       const t0 = Date.now();
+
+      // ─── Streaming HTTP: chunked transfer ───
+      if (useStream && service instanceof MssqlService) {
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Transfer-Encoding", "chunked");
+        res.setHeader("X-Cache", "BYPASS");
+        res.setHeader("X-Engine", service.engineName);
+        res.setHeader("X-Format", "stream");
+        for await (const chunk of service.streamGraph(req.params.id, database)) {
+          res.write(chunk);
+        }
+        const elapsed = Date.now() - t0;
+        res.setHeader("X-Response-Time", `${elapsed}ms`);
+        res.end();
+        return;
+      }
+
+      // ─── FOR JSON PATH: SQL builds the JSON string ───
+      if (useForJson && service instanceof MssqlService) {
+        const jsonStr = await service.getGraphForJson(req.params.id, database);
+        const elapsed = Date.now() - t0;
+        const rawBytes = Buffer.byteLength(jsonStr, 'utf8');
+        res.setHeader("X-Cache", "BYPASS");
+        res.setHeader("X-Response-Time", `${elapsed}ms`);
+        res.setHeader("X-Parallel-Queries", "true");
+        res.setHeader("X-Engine", service.engineName);
+        res.setHeader("X-Content-Length-Raw", rawBytes.toString());
+        res.setHeader("X-Format", "forjson");
+        res.setHeader("Content-Type", "application/json");
+        res.send(jsonStr);
+        return;
+      }
 
       // Vérifier le cache avant la requête pour savoir si c'est un HIT
       const cacheKey = `graph:${database || "mssql"}:${req.params.id}`;
@@ -56,6 +95,10 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
       res.setHeader("X-Engine", service.engineName);
       if (enrich) res.setHeader("X-Enriched", "true");
 
+      // Compression: Brotli when explicitly requested, gzip via middleware (default), or none
+      const useBrotli = req.query.compress === 'brotli';
+      const brotliQuality = Math.min(Math.max(parseInt(req.query.brotli_quality as string) || 4, 0), 11);
+
       // MessagePack binary format
       if (format === "msgpack") {
         const msgpackBuf = Buffer.from(encode(graphData));
@@ -68,7 +111,16 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
           responseSize: `${Math.round(msgpackBuf.length / 1024)}KB`,
           duration: `${elapsed}ms`,
         });
-        res.type("application/x-msgpack").send(msgpackBuf);
+        if (useBrotli) {
+          const compressed = await brotliCompressAsync(msgpackBuf, {
+            params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality },
+          });
+          res.setHeader("X-Compression", `brotli-q${brotliQuality}`);
+          res.setHeader("X-Brotli-Size", compressed.length.toString());
+          res.type("application/octet-stream").send(compressed);
+        } else {
+          res.type("application/x-msgpack").send(msgpackBuf);
+        }
       } else {
         const jsonStr = JSON.stringify(graphData);
         const rawBytes = Buffer.byteLength(jsonStr, 'utf8');
@@ -82,7 +134,16 @@ export function graphRoutes(service: GraphDatabaseService, broadcast?: (msg: Rec
           responseSize: `${Math.round(rawBytes / 1024)}KB`,
           duration: `${elapsed}ms`,
         });
-        res.send(jsonStr);
+        if (useBrotli) {
+          const compressed = await brotliCompressAsync(Buffer.from(jsonStr, 'utf8'), {
+            params: { [zlibConstants.BROTLI_PARAM_QUALITY]: brotliQuality },
+          });
+          res.setHeader("X-Compression", `brotli-q${brotliQuality}`);
+          res.setHeader("X-Brotli-Size", compressed.length.toString());
+          res.type("application/octet-stream").send(compressed);
+        } else {
+          res.send(jsonStr);
+        }
       }
     } catch (error) {
       MssqlService.sqlLog("ERROR", database || "default", {

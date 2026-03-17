@@ -1,25 +1,27 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import { GraphList } from './components/GraphList';
-import { GraphViewer } from './components/GraphViewer';
-import SigmaGraphViewer from './components/SigmaGraphViewer';
-import D3GraphViewer from './components/D3GraphViewer';
-import VisNetworkViewer from './components/VisNetworkViewer';
-import ForceGraph3DViewer from './components/ForceGraph3DViewer';
-import ImpactAnalysis from './components/ImpactAnalysis';
-import QueryPanel from './components/QueryPanel';
-import AlgorithmPanel from './components/AlgorithmPanel';
 import { OptimPanel } from './components/OptimPanel';
-import GraphFormModal from './components/GraphFormModal';
 import ClassificationFilterPanel from './components/ClassificationFilterPanel';
-import LevelExplorer from './components/LevelExplorer';
-import CosmosViewer from './components/CosmosViewer';
-import SimulationPanel from './components/SimulationPanel';
 import { graphApi, databaseApi, engineApi, cmdbApi, Database } from './services/api';
 import { transformGraphData } from './services/graphTransform';
 import { GraphSummary, ForceGraphData, GraphData } from './types/graph';
 import { useTheme } from './hooks/useTheme';
 import { useWebSocket, WsMessage } from './hooks/useWebSocket';
 import './App.css';
+
+// ── Lazy-loaded viewers (code splitting) ──
+const GraphViewer = lazy(() => import('./components/GraphViewer').then(m => ({ default: m.GraphViewer })));
+const SigmaGraphViewer = lazy(() => import('./components/SigmaGraphViewer'));
+const D3GraphViewer = lazy(() => import('./components/D3GraphViewer'));
+const VisNetworkViewer = lazy(() => import('./components/VisNetworkViewer'));
+const ForceGraph3DViewer = lazy(() => import('./components/ForceGraph3DViewer'));
+const ImpactAnalysis = lazy(() => import('./components/ImpactAnalysis'));
+const QueryPanel = lazy(() => import('./components/QueryPanel'));
+const AlgorithmPanel = lazy(() => import('./components/AlgorithmPanel'));
+const CosmosViewer = lazy(() => import('./components/CosmosViewer'));
+const SimulationPanel = lazy(() => import('./components/SimulationPanel'));
+const LevelExplorer = lazy(() => import('./components/LevelExplorer'));
+const GraphFormModal = lazy(() => import('./components/GraphFormModal'));
 
 type ViewerType = 'force-graph' | '3d' | 'sigma' | 'sigma-optim' | 'cosmos' | 'd3' | 'vis-network' | 'impact' | 'query' | 'algorithms' | 'explorer' | 'simulation';
 
@@ -41,6 +43,14 @@ function App() {
   const [lastLoadTime, setLastLoadTime] = useState<number | null>(null);
   const [lastLoadSource, setLastLoadSource] = useState<string>('');
   const [filteredGraphData, setFilteredGraphData] = useState<GraphData | null>(null);
+
+  // ── Detailed timing breakdown ──
+  const [timingBreakdown, setTimingBreakdown] = useState<{
+    apiCall: number;
+    transform: number;
+    viewerRender: number | null;
+  } | null>(null);
+  const timingRef = useRef<{ apiCall: number; transform: number } | null>(null);
 
   // ── Theme toggle ──
   const { theme, toggleTheme } = useTheme();
@@ -155,14 +165,21 @@ function App() {
         format: optFormat,
         enrich: optEnrich,
       });
-      const elapsed = Math.round(performance.now() - t0);
+      const tApi = performance.now();
 
       // Envoyer le résultat au panneau d'optimisations
       (window as any).__optimSetLastLoad?.(result);
       setRawGraphData(result.data);
       const transformedData = transformGraphData(result.data.nodes, result.data.edges);
       setGraphData(transformedData);
+      const tTransform = performance.now();
 
+      const apiCall = Math.round(tApi - t0);
+      const transform = Math.round(tTransform - tApi);
+      const elapsed = apiCall + transform;
+
+      timingRef.current = { apiCall, transform };
+      setTimingBreakdown({ apiCall, transform, viewerRender: null });
       setLastLoadTime(elapsed);
       setLastLoadSource(`${result.cacheStatus === 'HIT' ? 'Cache' : 'SQL'} ${result.responseTimeHeader || ''} — ${selectedDatabase}`);
     } catch (err) {
@@ -174,6 +191,15 @@ function App() {
       setGraphLoading(false);
     }
   };
+
+  const handleRenderComplete = useCallback((renderTimeMs: number) => {
+    const prev = timingRef.current;
+    if (prev) {
+      const total = prev.apiCall + prev.transform + Math.round(renderTimeMs);
+      setTimingBreakdown({ ...prev, viewerRender: Math.round(renderTimeMs) });
+      setLastLoadTime(total);
+    }
+  }, []);
 
   const handleDeleteGraph = async (id: string, _title: string) => {
     try {
@@ -358,14 +384,6 @@ function App() {
             >
               Cosmos (GPU)
             </button>
-            {/* G6 (AntV) — temporairement masqué
-            <button
-              className={viewerType === 'g6' ? 'active' : ''}
-              onClick={() => setViewerType('g6')}
-            >
-              G6 (AntV)
-            </button>
-            */}
             <button
               className={viewerType === 'd3' ? 'active' : ''}
               onClick={() => setViewerType('d3')}
@@ -430,7 +448,17 @@ function App() {
           )}
           {lastLoadTime !== null && (
             <span className="load-timing" title={lastLoadSource}>
-              ⏱ {lastLoadTime} ms {lastLoadSource && <small>({lastLoadSource})</small>}
+              ⏱ {lastLoadTime} ms
+              {timingBreakdown && (
+                <small style={{ marginLeft: 6, opacity: 0.85 }}>
+                  (API {timingBreakdown.apiCall}ms + Transform {timingBreakdown.transform}ms
+                  {timingBreakdown.viewerRender !== null
+                    ? ` + Render ${timingBreakdown.viewerRender}ms`
+                    : ' + Render...'}
+                  )
+                </small>
+              )}
+              {!timingBreakdown && lastLoadSource && <small> ({lastLoadSource})</small>}
             </span>
           )}
           <button className="theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
@@ -460,11 +488,13 @@ function App() {
           onDeleteGraph={handleDeleteGraph}
             onDeduplicateGraphs={graphs.some((g, i) => graphs.findIndex(x => x.title.trim().toLowerCase() === g.title.trim().toLowerCase()) !== i) ? handleDeduplicateGraphs : undefined}
         />
+        <Suspense fallback={<div className="graph-viewer-container"><div className="loading-state"><div className="spinner"></div><p>Chargement du viewer...</p></div></div>}>
         {viewerType === 'force-graph' ? (
           <GraphViewer
             data={filteredGraphData ? transformGraphData(filteredGraphData.nodes, filteredGraphData.edges) : graphData}
             title={selectedGraphTitle}
             loading={graphLoading}
+            onRenderComplete={handleRenderComplete}
           />
         ) : viewerType === '3d' ? (
           <div className="graph-viewer-container">
@@ -474,7 +504,7 @@ function App() {
                 <p>Chargement du graphe 3D...</p>
               </div>
             ) : (
-              <ForceGraph3DViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+              <ForceGraph3DViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} onRenderComplete={handleRenderComplete} />
             )}
           </div>
         ) : viewerType === 'sigma' || viewerType === 'sigma-optim' ? (
@@ -485,7 +515,7 @@ function App() {
                 <p>{valeoLoading ? 'Chargement DATA_VALEO...' : viewerType === 'sigma-optim' ? 'Chargement optimisé (MsgPack + Enrichissement)...' : 'Chargement du graphe...'}</p>
               </div>
             ) : (
-              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} onRenderComplete={handleRenderComplete} />
             )}
             {selectedGraphTitle.includes('DATA_VALEO') && rawGraphData && rawGraphData.nodes.length > 0 && (
               <LevelExplorer
@@ -509,7 +539,7 @@ function App() {
                 <p>Chargement du graphe (GPU)...</p>
               </div>
             ) : (
-              <CosmosViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} database={selectedDatabase || undefined} engine={selectedEngine || undefined} />
+              <CosmosViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} database={selectedDatabase || undefined} engine={selectedEngine || undefined} onRenderComplete={handleRenderComplete} />
             )}
           </div>
         ) : viewerType === 'd3' ? (
@@ -521,7 +551,7 @@ function App() {
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <D3GraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+              <D3GraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} onRenderComplete={handleRenderComplete} />
             )}
           </div>
         ) : viewerType === 'vis-network' ? (
@@ -532,7 +562,7 @@ function App() {
                 <p>Chargement du graphe...</p>
               </div>
             ) : (
-              <VisNetworkViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+              <VisNetworkViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} onRenderComplete={handleRenderComplete} />
             )}
           </div>
         ) : viewerType === 'impact' ? (
@@ -580,7 +610,7 @@ function App() {
               }}
             />
             {rawGraphData && rawGraphData.nodes.length > 0 ? (
-              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} />
+              <SigmaGraphViewer data={filteredGraphData || rawGraphData} graphId={selectedGraphId || undefined} onRenderComplete={handleRenderComplete} />
             ) : (
               <div className="loading-state">
                 <p>🔎 Recherchez un CI pour commencer l'exploration</p>
@@ -594,9 +624,11 @@ function App() {
               database={selectedDatabase || undefined}
               engine={selectedEngine || undefined}
               graphs={graphs}
+              databases={databases}
             />
           </div>
         ) : null}
+        </Suspense>
       </div>
 
       {/* Panneau de filtrage par classification */}
@@ -612,13 +644,17 @@ function App() {
       />
 
       {/* Modal de création de graphe */}
-      <GraphFormModal
-        open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onCreated={handleGraphCreated}
-        database={selectedDatabase}
-        engine={selectedEngine}
-      />
+      {showCreateModal && (
+        <Suspense fallback={null}>
+          <GraphFormModal
+            open={showCreateModal}
+            onClose={() => setShowCreateModal(false)}
+            onCreated={handleGraphCreated}
+            database={selectedDatabase}
+            engine={selectedEngine}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

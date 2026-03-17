@@ -193,26 +193,36 @@ export const graphApi = {
   getGraph: async (
     id: string,
     database?: string,
-    options?: { nocache?: boolean; nocompress?: boolean; engine?: EngineType; format?: 'json' | 'msgpack'; enrich?: boolean }
+    options?: { nocache?: boolean; nocompress?: boolean; compress?: 'gzip' | 'brotli'; engine?: EngineType; format?: 'json' | 'msgpack'; enrich?: boolean; forjson?: boolean; stream?: boolean }
   ): Promise<GraphLoadResult> => {
     const params: Record<string, string> = {};
     if (database) params.database = database;
     if (options?.nocache) params.nocache = 'true';
     if (options?.nocompress) params.nocompress = 'true';
+    if (options?.compress === 'brotli') params.compress = 'brotli';
+    if (options?.compress === 'gzip') params.compress = 'gzip';
     if (options?.engine) params.engine = options.engine;
     if (options?.format) params.format = options.format;
     if (options?.enrich) params.enrich = 'true';
+    if (options?.forjson) params.forjson = 'true';
+    if (options?.stream) params.stream = 'true';
 
     const useMsgpack = options?.format === 'msgpack';
+    const useBrotli = options?.compress === 'brotli';
 
     const t0 = performance.now();
-    const response = useMsgpack
+    // Brotli responses are raw compressed bytes (application/octet-stream) — always fetch as arraybuffer
+    const response = (useMsgpack || useBrotli)
       ? await api.get(`/graphs/${id}`, { params, responseType: 'arraybuffer' })
       : await api.get<GraphData>(`/graphs/${id}`, { params });
     const timeMs = Math.round(performance.now() - t0);
 
     let data: GraphData;
-    if (useMsgpack) {
+    if (useBrotli) {
+      // Brotli responses are opaque compressed bytes — skip decoding.
+      // The simulation only needs timing and sizes from headers.
+      data = { nodes: [], edges: [] };
+    } else if (useMsgpack) {
       data = decode(new Uint8Array(response.data as ArrayBuffer)) as GraphData;
     } else {
       data = response.data as GraphData;
@@ -222,6 +232,9 @@ export const graphApi = {
     const responseTimeHeader = response.headers['x-response-time'] || response.headers['X-Response-Time'] || null;
     const contentLengthStr = response.headers['content-length'];
     const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : null;
+    const brotliSizeStr = response.headers['x-brotli-size'] || response.headers['X-Brotli-Size'];
+    // For brotli: use X-Brotli-Size as compressed size (Content-Length = compressed for octet-stream)
+    const compressedSize = brotliSizeStr ? parseInt(brotliSizeStr, 10) : contentLength;
     const rawLengthStr = response.headers['x-content-length-raw'] || response.headers['X-Content-Length-Raw'];
     const rawContentLength = rawLengthStr ? parseInt(rawLengthStr, 10) : null;
     const parallelQueries = (response.headers['x-parallel-queries'] || response.headers['X-Parallel-Queries']) === 'true';
@@ -234,7 +247,7 @@ export const graphApi = {
       timeMs,
       cacheStatus: (cacheHeader as GraphLoadResult['cacheStatus']) ?? 'unknown',
       responseTimeHeader,
-      contentLength,
+      contentLength: compressedSize,
       rawContentLength,
       parallelQueries,
       engine: engineHeader,

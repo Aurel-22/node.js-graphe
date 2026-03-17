@@ -8,9 +8,10 @@ interface GraphViewerProps {
   data: ForceGraphData | null;
   title: string;
   loading: boolean;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
-export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }) => {
+export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading, onRenderComplete }) => {
   const graphRef = useRef<any>();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
@@ -47,6 +48,7 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
     if (graphRef.current && data) {
       // Démarrer le chronomètre
       startTimeRef.current = performance.now();
+      performance.mark('ForceGraph2D:start');
       setRenderTime(null);
       setTimingDetails(null);
       
@@ -67,6 +69,8 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
       setNodeTypes(typesArray);
       
       dataPrepTimeRef.current = performance.now() - startTimeRef.current;
+      performance.mark('ForceGraph2D:dataReady');
+      performance.measure('ForceGraph2D:dataPrep', 'ForceGraph2D:start', 'ForceGraph2D:dataReady');
 
       setTimeout(() => {
         graphRef.current.zoomToFit(400, 50);
@@ -176,12 +180,16 @@ export const GraphViewer: React.FC<GraphViewerProps> = ({ data, title, loading }
             // Calculer le temps de rendu
             if (startTimeRef.current > 0) {
               const elapsed = performance.now() - startTimeRef.current;
+              performance.mark('ForceGraph2D:rendered');
+              performance.measure('ForceGraph2D:layout', 'ForceGraph2D:dataReady', 'ForceGraph2D:rendered');
+              performance.measure('ForceGraph2D:total', 'ForceGraph2D:start', 'ForceGraph2D:rendered');
               setRenderTime(elapsed);
               setTimingDetails({
                 dataPrep: dataPrepTimeRef.current,
                 simulation: elapsed - dataPrepTimeRef.current,
               });
               startTimeRef.current = 0;
+              onRenderComplete?.(elapsed);
             }
           }}
         />

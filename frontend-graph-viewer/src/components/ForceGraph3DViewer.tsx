@@ -9,6 +9,7 @@ import './ForceGraph3DViewer.css';
 interface ForceGraph3DViewerProps {
   data: GraphData | null;
   graphId?: string;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
 interface Node3D {
@@ -35,7 +36,7 @@ interface GraphData3D {
   links: Link3D[];
 }
 
-const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data }) => {
+const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderComplete }) => {
   const graphRef = useRef<any>();
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -71,6 +72,7 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data }) => {
     if (!data) return null;
 
     startTimeRef.current = performance.now();
+    performance.mark('ForceGraph3D:start');
 
     const nodeCount = data.nodes.length;
 
@@ -119,6 +121,8 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data }) => {
     setTimeout(() => setNodeTypes(typesArray), 0);
 
     dataPrepTimeRef.current = performance.now() - startTimeRef.current;
+    performance.mark('ForceGraph3D:dataReady');
+    performance.measure('ForceGraph3D:dataPrep', 'ForceGraph3D:start', 'ForceGraph3D:dataReady');
 
     return { nodes, links };
   }, [data]);
@@ -338,12 +342,16 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data }) => {
           onEngineStop={() => {
             if (startTimeRef.current > 0) {
               const elapsed = performance.now() - startTimeRef.current;
+              performance.mark('ForceGraph3D:rendered');
+              performance.measure('ForceGraph3D:layout', 'ForceGraph3D:dataReady', 'ForceGraph3D:rendered');
+              performance.measure('ForceGraph3D:total', 'ForceGraph3D:start', 'ForceGraph3D:rendered');
               setRenderTime(elapsed);
               setTimingDetails({
                 dataPrep: dataPrepTimeRef.current,
                 simulation: elapsed - dataPrepTimeRef.current,
               });
               startTimeRef.current = 0;
+              onRenderComplete?.(elapsed);
             }
           }}
         />

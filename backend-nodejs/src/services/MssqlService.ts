@@ -361,6 +361,97 @@ export class MssqlService implements GraphDatabaseService {
     return result;
   }
 
+  /**
+   * FOR JSON PATH variant: let SQL Server build the JSON string directly,
+   * avoiding per-row JSON.parse in Node.js.
+   */
+  async getGraphForJson(graphId: string, database?: string): Promise<string> {
+    const db = database || this.defaultDatabase;
+    const pool = await this.getPool(db);
+
+    const [nodesRes, edgesRes] = await Promise.all([
+      pool.request()
+        .input("graphId", sql.NVarChar(255), graphId)
+        .query(`
+          SELECT
+            node_id AS id,
+            label,
+            node_type,
+            JSON_QUERY(ISNULL(properties, '{}')) AS properties
+          FROM graph_nodes
+          WHERE graph_id = @graphId
+          FOR JSON PATH
+        `),
+      pool.request()
+        .input("graphId", sql.NVarChar(255), graphId)
+        .query(`
+          SELECT
+            CAST(id AS NVARCHAR(50)) AS id,
+            source_id AS source,
+            target_id AS target,
+            label,
+            edge_type,
+            JSON_QUERY(ISNULL(properties, '{}')) AS properties
+          FROM graph_edges
+          WHERE graph_id = @graphId
+          FOR JSON PATH
+        `),
+    ]);
+
+    // FOR JSON PATH returns result across one or more rows in a single column
+    const nodesJson = nodesRes.recordset.map((r: any) => Object.values(r)[0]).join("") || "[]";
+    const edgesJson = edgesRes.recordset.map((r: any) => Object.values(r)[0]).join("") || "[]";
+
+    return `{"nodes":${nodesJson},"edges":${edgesJson}}`;
+  }
+
+  /**
+   * Streaming variant: yields nodes then edges as NDJSON lines for chunked HTTP.
+   */
+  async *streamGraph(graphId: string, database?: string): AsyncGenerator<string> {
+    const db = database || this.defaultDatabase;
+    const pool = await this.getPool(db);
+
+    // Stream nodes
+    const nodesReq = pool.request().input("graphId", sql.NVarChar(255), graphId);
+    nodesReq.stream = true;
+    nodesReq.query(`SELECT node_id, label, node_type, properties FROM graph_nodes WHERE graph_id = @graphId`);
+
+    yield '{"nodes":[\n';
+    let first = true;
+    for await (const row of nodesReq as any) {
+      const node = {
+        id: row.node_id,
+        label: row.label,
+        node_type: row.node_type,
+        properties: JSON.parse(row.properties || "{}"),
+      };
+      yield (first ? "" : ",\n") + JSON.stringify(node);
+      first = false;
+    }
+    yield '\n],"edges":[\n';
+
+    // Stream edges
+    const edgesReq = pool.request().input("graphId", sql.NVarChar(255), graphId);
+    edgesReq.stream = true;
+    edgesReq.query(`SELECT id, source_id, target_id, label, edge_type, properties FROM graph_edges WHERE graph_id = @graphId`);
+
+    first = true;
+    for await (const row of edgesReq as any) {
+      const edge = {
+        id: String(row.id),
+        source: row.source_id,
+        target: row.target_id,
+        label: row.label || undefined,
+        edge_type: row.edge_type,
+        properties: JSON.parse(row.properties || "{}"),
+      };
+      yield (first ? "" : ",\n") + JSON.stringify(edge);
+      first = false;
+    }
+    yield '\n]}';
+  }
+
   async listGraphs(database?: string): Promise<GraphSummary[]> {
     const db = database || this.defaultDatabase;
     const t0 = performance.now();

@@ -8,6 +8,7 @@ import './D3GraphViewer.css';
 interface D3GraphViewerProps {
   data: GraphData | null;
   graphId?: string;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
 interface D3Node extends d3.SimulationNodeDatum {
@@ -116,7 +117,7 @@ function getDefaultParams(nodeCount: number) {
   };
 }
 
-const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId }) => {
+const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId, onRenderComplete }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<d3.Simulation<D3Node, D3Link> | null>(null);
@@ -180,6 +181,7 @@ const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId }) => {
     if (!svgRef.current || !containerRef.current || !data) return;
 
     const t0 = performance.now();
+    performance.mark('D3:start');
     const width = containerRef.current.offsetWidth;
     const height = containerRef.current.offsetHeight;
 
@@ -215,6 +217,8 @@ const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId }) => {
     );
 
     const t1 = performance.now(); // End data transform
+    performance.mark('D3:dataReady');
+    performance.measure('D3:dataTransform', 'D3:start', 'D3:dataReady');
 
     // SVG + zoom
     const svg = d3.select(svgRef.current).attr('width', width).attr('height', height);
@@ -380,6 +384,18 @@ const D3GraphViewer: React.FC<D3GraphViewerProps> = ({ data, graphId }) => {
     });
 
     simulation.on('end', () => {
+      const totalTime = performance.now() - t0;
+      performance.mark('D3:rendered');
+      performance.measure('D3:layout', 'D3:dataReady', 'D3:rendered');
+      performance.measure('D3:total', 'D3:start', 'D3:rendered');
+      setRenderTime(totalTime);
+      setTimingDetails({
+        dataTransform: t1 - t0,
+        svgSetup: t2 - t1,
+        domElements: t3 - t2,
+        simulation: totalTime - t4,
+      });
+      onRenderComplete?.(totalTime);
       const bounds = (g.node() as SVGGElement)?.getBBox();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
         const padding = 50;

@@ -13,6 +13,7 @@ interface CosmosViewerProps {
   graphId?: string;
   database?: string;
   engine?: string;
+  onRenderComplete?: (renderTimeMs: number) => void;
 }
 
 function getAdaptiveParams(nodeCount: number) {
@@ -101,7 +102,7 @@ function getImpactColor(status: ImpactStatus | undefined, level: number, maxLeve
   return `rgb(${r},${g},${b})`;
 }
 
-const CosmosViewer: React.FC<CosmosViewerProps> = ({ data, graphId, database, engine }) => {
+const CosmosViewer: React.FC<CosmosViewerProps> = ({ data, graphId, database, engine, onRenderComplete }) => {
   const nodeCount = data?.nodes?.length ?? 0;
   const edgeCount = data?.edges?.length ?? 0;
   const defaults = useMemo(() => getAdaptiveParams(nodeCount), [nodeCount]);
@@ -117,6 +118,7 @@ const CosmosViewer: React.FC<CosmosViewerProps> = ({ data, graphId, database, en
   // Simulation control state
   const [paused, setPaused] = useState(false);
   const [simulationDone, setSimulationDone] = useState(false);
+  const renderStartRef = useRef<number>(0);
 
   const handlePause = useCallback(() => {
     cosmographRef.current?.pause();
@@ -138,7 +140,14 @@ const CosmosViewer: React.FC<CosmosViewerProps> = ({ data, graphId, database, en
   const handleSimulationEnd = useCallback(() => {
     setSimulationDone(true);
     setPaused(true);
-  }, []);
+    if (renderStartRef.current > 0) {
+      const elapsed = performance.now() - renderStartRef.current;
+      performance.mark('Cosmos:rendered');
+      performance.measure('Cosmos:total', 'Cosmos:start', 'Cosmos:rendered');
+      renderStartRef.current = 0;
+      onRenderComplete?.(elapsed);
+    }
+  }, [onRenderComplete]);
 
   // Impact analysis state
   const [impactMode, setImpactMode] = useState(false);
@@ -206,6 +215,8 @@ const CosmosViewer: React.FC<CosmosViewerProps> = ({ data, graphId, database, en
   // Transform nodes → points array for Cosmograph
   const points = useMemo(() => {
     if (!data?.nodes) return [];
+    renderStartRef.current = performance.now();
+    performance.mark('Cosmos:start');
     return data.nodes.map((n, i) => {
       let color: string;
       if (impactMode && impactState) {
