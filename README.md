@@ -1,4 +1,4 @@
-Version complète de la démo avec simplification.
+Version complète de la démo sans simplification.
 
 elle contient :
 -l'onglet simulation
