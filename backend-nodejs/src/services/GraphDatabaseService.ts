@@ -75,6 +75,15 @@ export interface GraphDatabaseService {
     database?: string,
   ): Promise<{ rows: Record<string, any>[]; elapsed_ms: number; rowCount: number; engine: string }>;
 
+  /**
+   * Exécuter une requête brute SQL et retourner TOUS les recordsets.
+   * Utile pour les requêtes qui retournent plusieurs tables (ex: nodes + edges).
+   */
+  executeMultiQuery(
+    query: string,
+    database?: string,
+  ): Promise<{ recordsets: Record<string, any>[][]; elapsed_ms: number; engine: string }>;
+
   getCacheStats(): {
     hits: number;
     misses: number;

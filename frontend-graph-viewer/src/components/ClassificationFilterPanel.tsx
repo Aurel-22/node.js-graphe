@@ -147,8 +147,8 @@ export default function ClassificationFilterPanel({ data, onFilteredData }: Clas
           </div>
 
           <div className="filter-actions">
-            <button onClick={showAll} disabled={hiddenKeys.size === 0}>Tout afficher</button>
-            <button onClick={hideAll} disabled={hiddenKeys.size === groups.length}>Tout masquer</button>
+            <button onClick={showAll} disabled={hiddenKeys.size === 0}>Show all</button>
+            <button onClick={hideAll} disabled={hiddenKeys.size === groups.length}>Hide all</button>
           </div>
 
           <div className="filter-list">

@@ -1,5 +1,3 @@
-import { GraphNode, GraphEdge, ForceGraphData, ForceGraphNode, ForceGraphLink } from '../types/graph';
-
 // Couleurs par type de nœud
 const NODE_COLORS: Record<string, string> = {
   // Types de workflow
@@ -69,32 +67,6 @@ const EDGE_COLORS: Record<string, string> = {
   optional: '#BDBDBD',
   default: '#999999',
 };
-
-export function transformGraphData(
-  nodes: GraphNode[],
-  edges: GraphEdge[]
-): ForceGraphData {
-  const forceNodes: ForceGraphNode[] = nodes.map((node) => ({
-    id: node.id,
-    name: node.label,
-    type: node.node_type,
-    color: NODE_COLORS[node.node_type] || generateColorFromString(node.node_type),
-    val: 10, // Taille du nœud
-  }));
-
-  const forceLinks: ForceGraphLink[] = edges.map((edge) => ({
-    source: edge.source,
-    target: edge.target,
-    label: edge.label,
-    type: edge.edge_type,
-    color: EDGE_COLORS[edge.edge_type] || EDGE_COLORS.default,
-  }));
-
-  return {
-    nodes: forceNodes,
-    links: forceLinks,
-  };
-}
 
 export function getNodeColor(type: string): string {
   return NODE_COLORS[type] || generateColorFromString(type);

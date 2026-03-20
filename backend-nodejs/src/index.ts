@@ -107,6 +107,34 @@ app.use("/api/cmdb", cmdbRoutes(
 ));
 logger.info("CMDB import route registered at POST /api/cmdb/import");
 
+// ===== Multi-recordset query for graph visualization =====
+// POST /api/query/graph — execute SQL returning multiple recordsets (nodes + edges)
+app.post("/api/query/graph", resolveEngine, async (req, res, next) => {
+  try {
+    const service: GraphDatabaseService = (req as any).dbService;
+    const { query } = req.body as { query?: string };
+    const database = req.query.database as string | undefined;
+
+    if (!query || typeof query !== "string" || query.trim().length === 0) {
+      return res.status(400).json({ error: "Missing 'query' in request body" });
+    }
+
+    if (!service.executeRawQuery) {
+      return res.status(501).json({ error: `Engine '${service.engineName}' does not support raw queries` });
+    }
+
+    const result = await service.executeMultiQuery(query.trim(), database);
+    res.setHeader("X-Response-Time", `${result.elapsed_ms}ms`);
+    res.setHeader("X-Engine", service.engineName);
+    res.json(result);
+  } catch (error: any) {
+    res.status(400).json({
+      error: error.message || "Query execution failed",
+      engine: ((req as any).dbService as GraphDatabaseService)?.engineName,
+    });
+  }
+});
+
 // ===== Raw query execution endpoint =====
 // POST /api/query — execute raw SQL
 app.post("/api/query", resolveEngine, async (req, res, next) => {

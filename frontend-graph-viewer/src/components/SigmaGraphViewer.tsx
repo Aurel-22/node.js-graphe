@@ -539,12 +539,16 @@ const FALLBACK_ICONS: string[] = [
   'game-icons/world-tree', 'game-icons/yin-yang', 'game-icons/zebra',
 ];
 
+export function getNodeColor(nodeType: string): string {
+  return NODE_COLORS[nodeType] || generateColorFromString(nodeType);
+}
+
 /**
  * Returns an Iconify SVG icon URL for any node type.
  * Uses the explicit map first (~250 types), then falls back to a deterministic
  * hash that picks from a pool of 500+ icons across 6 collections.
  */
-function getNodeIcon(nodeType: string): string {
+export function getNodeIcon(nodeType: string): string {
   if (NODE_ICONS[nodeType]) return NODE_ICONS[nodeType];
   // Deterministic hash → pick from fallback pool
   let hash = 0;
@@ -570,42 +574,48 @@ const NodeProgram = createNodeCompoundProgram([NodeCircleProgram, NodePictogramP
 function getDefaultSigmaParams(nodeCount: number) {
   if (nodeCount > 10000) {
     return {
-      nodeSize: 2, hoverSize: 6, edgeSize: 0.3, edgeOpacity: 0.15,
+      nodeSize: 2, hoverSize: 6, edgeSize: 0.1, edgeOpacity: 0.03,
       labelSize: 10, labelThreshold: 20, showLabels: false, showArrows: false, showIcons: false,
-      gravity: 0.05, scalingRatio: 50, slowDown: 10, iterations: 20,
-      barnesHut: true, strongGravity: false,
+      gravity: 0.05, scalingRatio: 50, slowDown: 10, iterations: 50,
+      barnesHut: true, strongGravity: false, edgeZoomThreshold: 3,
     };
   }
   if (nodeCount > 5000) {
     return {
-      nodeSize: 3, hoverSize: 8, edgeSize: 0.5, edgeOpacity: 0.25,
+      nodeSize: 3, hoverSize: 8, edgeSize: 0.15, edgeOpacity: 0.06,
       labelSize: 10, labelThreshold: 15, showLabels: false, showArrows: false, showIcons: false,
-      gravity: 0.3, scalingRatio: 10, slowDown: 3, iterations: 15,
-      barnesHut: true, strongGravity: false,
+      gravity: 0.3, scalingRatio: 10, slowDown: 3, iterations: 30,
+      barnesHut: true, strongGravity: false, edgeZoomThreshold: 2,
     };
   }
   if (nodeCount > 1000) {
     return {
-      nodeSize: 5, hoverSize: 10, edgeSize: 1, edgeOpacity: 0.5,
+      nodeSize: 5, hoverSize: 10, edgeSize: 0.5, edgeOpacity: 0.15,
       labelSize: 10, labelThreshold: 8, showLabels: true, showArrows: true, showIcons: true,
-      gravity: 0.5, scalingRatio: 5, slowDown: 2, iterations: 30,
-      barnesHut: true, strongGravity: false,
+      gravity: 0.5, scalingRatio: 5, slowDown: 2, iterations: 60,
+      barnesHut: true, strongGravity: false, edgeZoomThreshold: 1.5,
     };
   }
   if (nodeCount > 200) {
     return {
       nodeSize: 8, hoverSize: 13, edgeSize: 1.5, edgeOpacity: 0.6,
       labelSize: 12, labelThreshold: 8, showLabels: true, showArrows: true, showIcons: true,
-      gravity: 1, scalingRatio: 10, slowDown: 1, iterations: 50,
-      barnesHut: false, strongGravity: false,
+      gravity: 1, scalingRatio: 10, slowDown: 1, iterations: 80,
+      barnesHut: false, strongGravity: false, edgeZoomThreshold: 0,
     };
   }
   return {
     nodeSize: 10, hoverSize: 15, edgeSize: 2, edgeOpacity: 0.7,
     labelSize: 12, labelThreshold: 6, showLabels: true, showArrows: true, showIcons: true,
-    gravity: 1, scalingRatio: 10, slowDown: 1, iterations: 50,
-    barnesHut: false, strongGravity: false,
+    gravity: 1, scalingRatio: 10, slowDown: 1, iterations: 80,
+    barnesHut: false, strongGravity: false, edgeZoomThreshold: 0,
   };
+}
+
+/** Edge color with darker grey for dense graphs to avoid white blob */
+function edgeColor(opacity: number, nodeCount: number): string {
+  const grey = nodeCount > 5000 ? 40 : nodeCount > 1000 ? 60 : 100;
+  return `rgba(${grey},${grey},${grey},${opacity})`;
 }
 
 interface LevelTiming {
@@ -631,6 +641,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
   const graphRef = useRef<Graph | null>(null);
+  const badgeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [renderTime, setRenderTime] = useState<number | null>(null);
   const [timingDetails, setTimingDetails] = useState<{
@@ -653,6 +664,12 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
   const MAX_NODE_LIST = 100;
   const [nodeListFilter, setNodeListFilter] = useState('');
   const [exploredNodes, setExploredNodes] = useState<Set<string>>(new Set());
+  const [nodeListMode, setNodeListMode] = useState<'search' | 'visible'>('search');
+  const [visibleListFilter, setVisibleListFilter] = useState('');
+  const [impactMode, setImpactMode] = useState(false);
+  const [impactDepth, setImpactDepth] = useState(3);
+  const impactSourceRef = useRef<string | null>(null);
+  const impactedNodesRef = useRef<Set<string>>(new Set());
 
   // Build a sampled node list (max 100 for large graphs, used when no filter)
   const nodeListSample = useMemo(() => {
@@ -687,6 +704,19 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     return nodeListSample;
   }, [data, nodeListSample, nodeListFilter]);
 
+  // List of currently visible nodes (for 'visible' mode panel)
+  const visibleNodesList = useMemo(() => {
+    if (!data || visibleNodes.size === 0) return [];
+    const list = data.nodes.filter(n => visibleNodes.has(n.id));
+    if (!visibleListFilter) return list;
+    const q = visibleListFilter.toLowerCase();
+    return list.filter(n =>
+      n.id.toLowerCase().includes(q) ||
+      (n.label || '').toLowerCase().includes(q) ||
+      (n.node_type || '').toLowerCase().includes(q)
+    );
+  }, [data, visibleNodes, visibleListFilter]);
+
   useEffect(() => { progressiveModeRef.current = progressiveMode; }, [progressiveMode]);
   useEffect(() => { currentDepthRef.current = currentDepth; }, [currentDepth]);
   useEffect(() => { visibleNodesRef.current = visibleNodes; }, [visibleNodes]);
@@ -718,9 +748,14 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
   const [iterations, setIterations] = useState(defaults.iterations);
   const [barnesHut, setBarnesHut] = useState(defaults.barnesHut);
   const [strongGravity, setStrongGravity] = useState(defaults.strongGravity);
+  const [edgeZoomThreshold, setEdgeZoomThreshold] = useState(defaults.edgeZoomThreshold);
 
   // Ref for hover/loadNextLevel to read up-to-date render params
   const renderParamsRef = useRef({ nodeSize, hoverSize, edgeSize, edgeOpacity, showArrows });
+  const edgeZoomThresholdRef = useRef(edgeZoomThreshold);
+  useEffect(() => { edgeZoomThresholdRef.current = edgeZoomThreshold; }, [edgeZoomThreshold]);
+  // Visible nodes set (updated on camera move) for viewport-based edge filtering
+  const visibleNodeSetRef = useRef<Set<string> | null>(null);
   useEffect(() => {
     renderParamsRef.current = { nodeSize, hoverSize, edgeSize, edgeOpacity, showArrows };
   }, [nodeSize, hoverSize, edgeSize, edgeOpacity, showArrows]);
@@ -735,6 +770,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     setGravity(d.gravity); setScalingRatio(d.scalingRatio);
     setSlowDown(d.slowDown); setIterations(d.iterations);
     setBarnesHut(d.barnesHut); setStrongGravity(d.strongGravity);
+    setEdgeZoomThreshold(d.edgeZoomThreshold);
   }, [data, graphId]);
 
   // ─── Pre-computed indexes ───
@@ -757,6 +793,17 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     return adj;
   }, [data]);
 
+  // Adaptive node size based on total visible count (progressive mode)
+  const progressiveNodeSize = useCallback((totalVisible: number): number => {
+    if (totalVisible <= 1) return 50;
+    if (totalVisible < 10) return 15;
+    if (totalVisible < 50) return 12;
+    if (totalVisible < 100) return 10;
+    if (totalVisible < 500) return 7;
+    if (totalVisible < 1000) return 5;
+    return 3;
+  }, []);
+
   // ─── Progressive: explore a node from the list ───
   const exploreNode = useCallback((nodeId: string) => {
     if (!graphRef.current || !data || data.nodes.length === 0) return;
@@ -765,7 +812,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     const p = renderParamsRef.current;
     const withCache = useCacheRef.current;
     const cachedPositions = (withCache && graphId) ? nodePositionCache.getGraphPositions(graphId) : {};
-    const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
+    const totalNodes = data?.nodes?.length || 0;
+    const edgeColorStr = edgeColor(p.edgeOpacity, totalNodes);
 
     const currentNodes = new Set<string>();
     graph.forEachNode((n) => currentNodes.add(n));
@@ -797,6 +845,9 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       return;
     }
 
+    const allVisible = new Set([...currentNodes, ...newNodeIds]);
+    const adaptiveSize = progressiveNodeSize(allVisible.size);
+
     for (const nId of newNodeIds) {
       const nodeData = nodeIndex.get(nId);
       if (!nodeData) continue;
@@ -808,7 +859,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       const cachedPos = cachedPositions[nId];
       graph.addNode(nId, {
         label: nodeData.label || nId,
-        size: p.nodeSize,
+        size: adaptiveSize,
         color,
         x: cachedPos?.x ?? Math.random() * 500,
         y: cachedPos?.y ?? Math.random() * 500,
@@ -816,11 +867,16 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         nodeType,
         image: getNodeIcon(nodeType),
         pictoColor: '#fff',
+        capacityExceeded: !!nodeData.properties?.capacityExceeded,
       });
     }
 
+    // Resize existing nodes to match new adaptive size
+    for (const nId of currentNodes) {
+      graph.setNodeAttribute(nId, 'size', adaptiveSize);
+    }
+
     // Add edges between all visible nodes
-    const allVisible = new Set([...currentNodes, ...newNodeIds]);
     const existingEdges = new Set<string>();
     graph.forEachEdge((_edge, _attrs, source, target) => existingEdges.add(`${source}->${target}`));
 
@@ -855,6 +911,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
             gravity: count > 5000 ? 0.3 : 1,
             scalingRatio: count > 5000 ? 10 : 5,
             barnesHutOptimize: count > 1000,
+            linLogMode: true,
+            adjustSizes: true,
           },
         });
       } catch (error) {
@@ -877,8 +935,133 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     setVisibleNodes(allVisible);
     setExploredNodes(prev => new Set([...prev, nodeId]));
     setCurrentDepth(prev => prev + 1);
+    setNodeListMode('visible');
     sigmaRef.current?.refresh();
   }, [data, adjacency, nodeIndex, graphId, nodeTypes]);
+
+  // ─── Progressive: impact analysis from a node (BFS to depth) ───
+  const impactExplore = useCallback((nodeId: string) => {
+    if (!graphRef.current || !data || data.nodes.length === 0) return;
+
+    const graph = graphRef.current;
+    const p = renderParamsRef.current;
+    const withCache = useCacheRef.current;
+    const cachedPositions = (withCache && graphId) ? nodePositionCache.getGraphPositions(graphId) : {};
+    const totalNodes = data?.nodes?.length || 0;
+    const edgeColorStr = edgeColor(p.edgeOpacity, totalNodes);
+
+    // BFS to find impacted nodes up to impactDepth
+    const impactedIds = new Set<string>([nodeId]);
+    let frontier = new Set<string>([nodeId]);
+    for (let level = 0; level < impactDepth; level++) {
+      const next = new Set<string>();
+      for (const nId of frontier) {
+        const neighbors = adjacency.get(nId);
+        if (neighbors) {
+          for (const neighbor of neighbors) {
+            if (!impactedIds.has(neighbor)) {
+              impactedIds.add(neighbor);
+              next.add(neighbor);
+            }
+          }
+        }
+      }
+      if (next.size === 0) break;
+      frontier = next;
+    }
+
+    // Clear existing graph
+    graph.clear();
+
+    const typeMap = new Map<string, { color: string; count: number }>();
+    const adaptiveSize = progressiveNodeSize(impactedIds.size);
+
+    // Add impacted nodes
+    for (const nId of impactedIds) {
+      const nodeData = nodeIndex.get(nId);
+      if (!nodeData) continue;
+      const nodeType = nodeData.node_type || 'default';
+      const color = NODE_COLORS[nodeType] || generateColorFromString(nodeType);
+      const existing = typeMap.get(nodeType);
+      if (existing) existing.count++;
+      else typeMap.set(nodeType, { color, count: 1 });
+      const cachedPos = cachedPositions[nId];
+      graph.addNode(nId, {
+        label: nodeData.label || nId,
+        size: nId === nodeId ? adaptiveSize * 1.8 : adaptiveSize,
+        color: nId === nodeId ? '#FF0000' : '#FF9800',
+        x: cachedPos?.x ?? Math.random() * 500,
+        y: cachedPos?.y ?? Math.random() * 500,
+        type: 'pictogram',
+        nodeType,
+        image: getNodeIcon(nodeType),
+        pictoColor: '#fff',
+        highlighted: true,
+        capacityExceeded: !!nodeData.properties?.capacityExceeded,
+        requestCount: nodeData.properties?.requestCount || 0,
+      });
+    }
+
+    // Add edges between impacted nodes
+    const edgeSet = new Set<string>();
+    data.edges.forEach((edge) => {
+      if (impactedIds.has(edge.source) && impactedIds.has(edge.target)) {
+        const key = `${edge.source}->${edge.target}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          try {
+            graph.addEdge(edge.source, edge.target, {
+              size: p.edgeSize,
+              color: edgeColorStr,
+              type: p.showArrows ? 'arrow' : 'line',
+            });
+          } catch (e) { /* skip duplicate */ }
+        }
+      }
+    });
+
+    // Layout
+    if (graph.order > 1) {
+      try {
+        const settings = forceAtlas2.inferSettings(graph);
+        const count = graph.order;
+        const iters = count > 10000 ? 10 : count > 5000 ? 15 : count > 1000 ? 20 : 30;
+        forceAtlas2.assign(graph, {
+          iterations: iters,
+          settings: {
+            ...settings,
+            gravity: count > 5000 ? 0.3 : 1,
+            scalingRatio: count > 5000 ? 10 : 5,
+            barnesHutOptimize: count > 1000,
+            linLogMode: true,
+            adjustSizes: true,
+          },
+        });
+      } catch (error) {
+        console.error('Layout error:', error);
+      }
+    }
+
+    if (graphId) {
+      const positions: Record<string, { x: number; y: number }> = {};
+      graph.forEachNode((nId, attrs) => { positions[nId] = { x: attrs.x, y: attrs.y }; });
+      nodePositionCache.setGraphPositions(graphId, positions);
+    }
+
+    setNodeTypes(
+      Array.from(typeMap.entries())
+        .map(([type, { color, count }]) => ({ type, color, count }))
+        .sort((a, b) => b.count - a.count)
+    );
+    setVisibleNodesHistory([]);
+    setVisibleNodes(impactedIds);
+    setExploredNodes(new Set([nodeId]));
+    setCurrentDepth(impactDepth);
+    setNodeListMode('visible');
+    impactSourceRef.current = nodeId;
+    impactedNodesRef.current = impactedIds;
+    sigmaRef.current?.refresh();
+  }, [data, adjacency, nodeIndex, graphId, impactDepth]);
 
   // ─── Progressive: load next level ───
   const loadNextLevel = useCallback(() => {
@@ -926,7 +1109,11 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     nodeTypes.forEach(({ type, color, count }) => typeMap.set(type, { color, count }));
 
     const cachedPositions = (withCache && graphId) ? nodePositionCache.getGraphPositions(graphId) : {};
-    const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
+    const totalNodes = data?.nodes?.length || 0;
+    const edgeColorStr = edgeColor(p.edgeOpacity, totalNodes);
+
+    const allVisible = new Set([...currentNodes, ...newNodeIds]);
+    const adaptiveSize = progressiveNodeSize(allVisible.size);
 
     for (const nId of newNodeIds) {
       const nodeData = nodeIndex.get(nId);
@@ -939,7 +1126,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       const cachedPos = cachedPositions[nId];
       graph.addNode(nId, {
         label: nodeData.label || nId,
-        size: p.nodeSize,
+        size: adaptiveSize,
         color,
         x: cachedPos?.x ?? Math.random() * 500,
         y: cachedPos?.y ?? Math.random() * 500,
@@ -947,10 +1134,10 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         nodeType,
         image: getNodeIcon(nodeType),
         pictoColor: '#fff',
+        capacityExceeded: !!nodeData.properties?.capacityExceeded,
       });
     }
 
-    const allVisible = new Set([...currentNodes, ...newNodeIds]);
     const existingEdges = new Set<string>();
     graph.forEachEdge((_edge, _attrs, source, target) => existingEdges.add(`${source}->${target}`));
 
@@ -970,8 +1157,9 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       }
     });
 
+    // Resize existing nodes to match new adaptive size
     for (const nodeId of currentNodes) {
-      graph.setNodeAttribute(nodeId, 'size', p.nodeSize);
+      graph.setNodeAttribute(nodeId, 'size', adaptiveSize);
     }
 
     // Layout: skip ForceAtlas2 if all new nodes have cached positions
@@ -992,6 +1180,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
             gravity: count > 5000 ? 0.3 : 1,
             scalingRatio: count > 5000 ? 10 : 5,
             barnesHutOptimize: count > 1000,
+            linLogMode: true,
+            adjustSizes: true,
           },
         });
       } catch (error) {
@@ -1041,6 +1231,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     setExploredNodes(new Set());
     setNodeListFilter('');
     setVisibleNodesHistory([]);
+    impactSourceRef.current = null;
+    impactedNodesRef.current = new Set();
     // Increment resetKey to trigger full rebuild of graph + Sigma
     setResetKey(k => k + 1);
   }, [data]);
@@ -1109,7 +1301,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       setCurrentDepth(0);
       setExploredNodes(new Set());
     } else {
-      const edgeColorStr = `rgba(100,100,100,${p.edgeOpacity})`;
+      const edgeColorStr = edgeColor(p.edgeOpacity, data.nodes.length);
 
       data.nodes.forEach((node) => {
         const nodeType = node.node_type || 'default';
@@ -1118,17 +1310,22 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         if (existing) existing.count++;
         else typeMap.set(nodeType, { color, count: 1 });
         const cachedPos = cachedPositions[node.id];
-        graph.addNode(node.id, {
+        const nodeAttrs: Record<string, any> = {
           label: node.label || node.id,
           size: p.nodeSize,
           color,
           x: cachedPos?.x ?? Math.random() * 500,
           y: cachedPos?.y ?? Math.random() * 500,
-          type: 'pictogram',
           nodeType,
-          image: getNodeIcon(nodeType),
           pictoColor: '#fff',
-        });
+        };
+        if (showIcons) {
+          nodeAttrs.type = 'pictogram';
+          nodeAttrs.image = getNodeIcon(nodeType);
+        }
+        nodeAttrs.capacityExceeded = !!node.properties?.capacityExceeded;
+        nodeAttrs.requestCount = node.properties?.requestCount || 0;
+        graph.addNode(node.id, nodeAttrs);
       });
 
       const edgeSet = new Set<string>();
@@ -1147,8 +1344,11 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         }
       });
 
-      // ForceAtlas2 – only when no cached positions
-      const hasCachedPositions = Object.keys(cachedPositions).length > 0;
+      // ForceAtlas2 – only when cached positions cover the current graph
+      const cachedKeys = Object.keys(cachedPositions);
+      const hasCachedPositions = cachedKeys.length > 0 &&
+        data.nodes.length > 0 &&
+        data.nodes.every(n => cachedPositions[n.id]);
       tLayoutStart = performance.now();
       if (!hasCachedPositions) {
         try {
@@ -1162,6 +1362,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
               slowDown,
               barnesHutOptimize: barnesHut,
               strongGravityMode: strongGravity,
+              linLogMode: true,
+              adjustSizes: true,
             },
           });
         } catch (error) {
@@ -1189,28 +1391,126 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
 
     // Create Sigma instance
     const effectiveNodeCount = progressiveMode ? 1 : data.nodes.length;
-    const labelColorValue = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#fff';
     const sigma = new Sigma(graph, containerRef.current, {
       renderEdgeLabels: false,
-      renderLabels: p.nodeSize >= 3, // initial; live-updated via setSetting
+      renderLabels: progressiveMode ? true : p.nodeSize >= 3,
       defaultNodeColor: NODE_COLORS.default,
-      defaultEdgeColor: `rgba(100,100,100,${p.edgeOpacity})`,
+      defaultEdgeColor: edgeColor(p.edgeOpacity, data.nodes.length),
       defaultNodeType: showIcons ? 'pictogram' : 'circle',
       nodeProgramClasses: { pictogram: NodeProgram, circle: NodeCircleProgram },
-      labelSize: p.nodeSize >= 3 ? 12 : 10,
+      labelSize: progressiveMode ? 14 : (p.nodeSize >= 3 ? 12 : 10),
       labelWeight: '600',
-      labelColor: { color: labelColorValue },
-      labelRenderedSizeThreshold: effectiveNodeCount > 5000 ? 20 : 8,
+      labelColor: { color: '#000000' },
+      labelRenderedSizeThreshold: progressiveMode ? 2 : (effectiveNodeCount > 5000 ? 20 : 8),
       enableEdgeEvents: effectiveNodeCount < 2000,
       allowInvalidContainer: true,
       zIndex: true,
       minCameraRatio: 0.01,
       maxCameraRatio: 20,
+      edgeReducer: (edge, attrs) => {
+        const threshold = edgeZoomThresholdRef.current;
+        if (threshold > 0 && visibleNodeSetRef.current && graphRef.current) {
+          const src = graphRef.current.source(edge);
+          const tgt = graphRef.current.target(edge);
+          if (!visibleNodeSetRef.current.has(src) && !visibleNodeSetRef.current.has(tgt)) {
+            return { ...attrs, hidden: true };
+          }
+        }
+        return attrs;
+      },
     });
 
     sigmaRef.current = sigma;
 
     const tSigmaEnd = performance.now();
+
+    // ── Badge overlay: exclamation mark on every node (bottom-right) ──
+    let badgeCanvas = badgeCanvasRef.current;
+    if (!badgeCanvas) {
+      badgeCanvas = document.createElement('canvas');
+      badgeCanvas.style.position = 'absolute';
+      badgeCanvas.style.top = '0';
+      badgeCanvas.style.left = '0';
+      badgeCanvas.style.pointerEvents = 'none';
+      badgeCanvas.style.zIndex = '1';
+      containerRef.current!.appendChild(badgeCanvas);
+      badgeCanvasRef.current = badgeCanvas;
+    }
+
+    const drawBadges = () => {
+      if (!badgeCanvas || !graphRef.current || !sigmaRef.current) return;
+      const g = graphRef.current;
+      const s = sigmaRef.current;
+      const ctr = s.getContainer();
+      const w = ctr.offsetWidth;
+      const h = ctr.offsetHeight;
+      const dpr = window.devicePixelRatio || 1;
+      badgeCanvas.width = w * dpr;
+      badgeCanvas.height = h * dpr;
+      badgeCanvas.style.width = w + 'px';
+      badgeCanvas.style.height = h + 'px';
+      const ctx = badgeCanvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      g.forEachNode((_, nodeAttrs) => {
+        if (nodeAttrs.hidden) return;
+        if (nodeAttrs.capacityExceeded !== true) return;
+        const pos = s.graphToViewport(nodeAttrs as { x: number; y: number });
+        const nodeSize = s.scaleSize(nodeAttrs.size as number);
+        if (nodeSize < 4) return;
+
+        const badgeRadius = Math.max(nodeSize * 0.3, 4);
+        const bx = pos.x + nodeSize * 0.65;
+        const by = pos.y + nodeSize * 0.65;
+
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#F44336';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = Math.max(badgeRadius * 0.15, 0.5);
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(badgeRadius * 1.4)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', bx, by);
+      });
+
+      // ── Blue badge: request count (bottom-left) ──
+      g.forEachNode((_, nodeAttrs) => {
+        if (nodeAttrs.hidden) return;
+        const count = nodeAttrs.requestCount as number;
+        if (!count || count <= 0) return;
+        const pos = s.graphToViewport(nodeAttrs as { x: number; y: number });
+        const nodeSize = s.scaleSize(nodeAttrs.size as number);
+        if (nodeSize < 4) return;
+
+        const text = String(count);
+        const badgeRadius = Math.max(nodeSize * 0.15, 6);
+        const bx = pos.x - nodeSize * 0.65;
+        const by = pos.y + nodeSize * 0.65;
+
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#2196F3';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = Math.max(badgeRadius * 0.15, 0.5);
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(badgeRadius * 1.2)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, bx, by);
+      });
+    };
+
+    sigma.on('afterRender', drawBadges);
 
     // WebGL context recovery
     const canvas = containerRef.current.querySelector('canvas');
@@ -1220,21 +1520,78 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         console.warn('WebGL context lost');
       });
       canvas.addEventListener('webglcontextrestored', () => {
-        sigma.refresh();
+        try { sigma.refresh(); } catch (e) { console.warn('WebGL restore refresh failed:', e); }
       });
     }
 
+    // Re-compute visible node set on camera move (for viewport edge filtering)
+    let edgeRefreshRaf = 0;
+    const cam = sigma.getCamera();
+    const updateVisibleNodes = () => {
+      const threshold = edgeZoomThresholdRef.current;
+      if (threshold <= 0) {
+        visibleNodeSetRef.current = null;
+        return;
+      }
+      // Convert viewport corners to graph-space coordinates
+      const width = sigma.getContainer().offsetWidth;
+      const height = sigma.getContainer().offsetHeight;
+      const topLeft = sigma.viewportToGraph({ x: 0, y: 0 });
+      const bottomRight = sigma.viewportToGraph({ x: width, y: height });
+      // Use min/max to handle Y-axis inversion (viewport Y↓ vs graph Y↑)
+      const shrink = 1 - Math.min((threshold - 1) / 10, 0.9);
+      const minX = Math.min(topLeft.x, bottomRight.x);
+      const maxX = Math.max(topLeft.x, bottomRight.x);
+      const minY = Math.min(topLeft.y, bottomRight.y);
+      const maxY = Math.max(topLeft.y, bottomRight.y);
+      const gw = maxX - minX, gh = maxY - minY;
+      const cx = minX + gw / 2, cy = minY + gh / 2;
+      const hw = gw * shrink / 2, hh = gh * shrink / 2;
+      const x1 = cx - hw, x2 = cx + hw;
+      const y1 = cy - hh, y2 = cy + hh;
+
+      const visible = new Set<string>();
+      graph.forEachNode((nodeId, attrs) => {
+        const nx = attrs.x, ny = attrs.y;
+        if (nx >= x1 && nx <= x2 && ny >= y1 && ny <= y2) {
+          visible.add(nodeId);
+        }
+      });
+      visibleNodeSetRef.current = visible;
+    };
+    cam.on('updated', () => {
+      if (edgeZoomThresholdRef.current > 0) {
+        cancelAnimationFrame(edgeRefreshRaf);
+        edgeRefreshRaf = requestAnimationFrame(() => {
+          updateVisibleNodes();
+          sigma.refresh();
+        });
+      } else if (visibleNodeSetRef.current) {
+        visibleNodeSetRef.current = null;
+        sigma.refresh();
+      }
+    });
+
     // ─── Hover handlers (read from refs for up-to-date sizes) ───
+    let savedSizes: Map<string, number> | null = null;
+
     sigma.on('enterNode', ({ node }) => {
       setHoveredNode(node);
       const rp = renderParamsRef.current;
       const neighbors = new Set(graph.neighbors(node));
       neighbors.add(node);
 
+      // Save current sizes before modifying
+      savedSizes = new Map();
+      graph.forEachNode((n) => {
+        savedSizes!.set(n, graph.getNodeAttributes(n).size ?? rp.nodeSize);
+      });
+
+      const hoverScale = 1.6;
       graph.forEachNode((n) => {
         if (neighbors.has(n)) {
           graph.setNodeAttribute(n, 'highlighted', true);
-          graph.setNodeAttribute(n, 'size', rp.hoverSize);
+          graph.setNodeAttribute(n, 'size', (savedSizes!.get(n) ?? rp.nodeSize) * hoverScale);
         } else {
           graph.setNodeAttribute(n, 'color', 'rgba(50,50,50,0.15)');
           graph.setNodeAttribute(n, 'highlighted', false);
@@ -1256,23 +1613,83 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     sigma.on('leaveNode', () => {
       setHoveredNode(null);
       const rp = renderParamsRef.current;
-      const edgeColorStr = `rgba(100,100,100,${rp.edgeOpacity})`;
+      const totalNodes = data?.nodes?.length || 0;
+      const edgeColorStr = edgeColor(rp.edgeOpacity, totalNodes);
 
       graph.forEachNode((node) => {
         const attributes = graph.getNodeAttributes(node);
         const nodeType = attributes.nodeType || 'default';
         const originalColor = NODE_COLORS[nodeType] || generateColorFromString(nodeType);
         graph.setNodeAttribute(node, 'color', originalColor);
-        graph.setNodeAttribute(node, 'size', rp.nodeSize);
+        graph.setNodeAttribute(node, 'size', savedSizes?.get(node) ?? rp.nodeSize);
         graph.setNodeAttribute(node, 'highlighted', false);
       });
+      savedSizes = null;
 
       graph.forEachEdge((edge) => {
         graph.setEdgeAttribute(edge, 'color', edgeColorStr);
         graph.setEdgeAttribute(edge, 'size', rp.edgeSize);
       });
 
+      // Re-apply impact analysis rings if active
+      const srcId = impactSourceRef.current;
+      const impacted = impactedNodesRef.current;
+      if (srcId && impacted.size > 0) {
+        for (const nId of impacted) {
+          if (graph.hasNode(nId)) {
+            graph.setNodeAttribute(nId, 'highlighted', true);
+            graph.setNodeAttribute(nId, 'color', nId === srcId ? '#FF0000' : '#FF9800');
+          }
+        }
+      }
+
       sigma.refresh();
+    });
+
+    // Drag'n'drop: move a single node without moving the others
+    let draggedNode: string | null = null;
+    let isDragging = false;
+    let hasDragged = false;
+
+    sigma.on('downNode', (e) => {
+      isDragging = true;
+      hasDragged = false;
+      draggedNode = e.node;
+      graph.setNodeAttribute(draggedNode, 'highlighted', true);
+      if (!sigma.getCustomBBox()) sigma.setCustomBBox(sigma.getBBox());
+    });
+
+    sigma.on('moveBody', ({ event }) => {
+      if (!isDragging || !draggedNode) return;
+      hasDragged = true;
+      const pos = sigma.viewportToGraph(event);
+      graph.setNodeAttribute(draggedNode, 'x', pos.x);
+      graph.setNodeAttribute(draggedNode, 'y', pos.y);
+      event.preventSigmaDefault();
+      event.original.preventDefault();
+      event.original.stopPropagation();
+    });
+
+    const handleDragUp = () => {
+      if (draggedNode) {
+        graph.removeNodeAttribute(draggedNode, 'highlighted');
+      }
+      isDragging = false;
+      draggedNode = null;
+    };
+    sigma.on('upNode', handleDragUp);
+    sigma.on('upStage', handleDragUp);
+
+    // Click on node: center the camera on it (skip if node was dragged)
+    sigma.on('clickNode', ({ node }) => {
+      if (hasDragged) { hasDragged = false; return; }
+      const attrs = graph.getNodeAttributes(node);
+      const viewportPos = sigma.graphToViewport({ x: attrs.x, y: attrs.y });
+      const framedPos = sigma.viewportToFramedGraph(viewportPos);
+      sigma.getCamera().animate(
+        { x: framedPos.x, y: framedPos.y, ratio: Math.min(sigma.getCamera().ratio, 0.15) },
+        { duration: 400 },
+      );
     });
 
     // Measure synchronous setup time (without actual WebGL render)
@@ -1314,6 +1731,10 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     return () => {
       clearTimeout(fallbackTimer);
       sigma.off('afterRender', onFirstRender);
+      if (badgeCanvasRef.current && badgeCanvasRef.current.parentElement) {
+        badgeCanvasRef.current.parentElement.removeChild(badgeCanvasRef.current);
+        badgeCanvasRef.current = null;
+      }
       if (sigmaRef.current) {
         sigmaRef.current.kill();
         sigmaRef.current = null;
@@ -1326,7 +1747,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     if (!sigmaRef.current || !graphRef.current) return;
     const graph = graphRef.current;
     const sigma = sigmaRef.current;
-    const edgeColorStr = `rgba(100,100,100,${edgeOpacity})`;
+    const totalNodes = data?.nodes?.length || 0;
+    const edgeColorStr = edgeColor(edgeOpacity, totalNodes);
 
     graph.forEachNode((n) => {
       graph.setNodeAttribute(n, 'size', nodeSize);
@@ -1350,7 +1772,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     sigma.setSetting('labelSize', labelSize);
     sigma.setSetting('labelRenderedSizeThreshold', labelThreshold);
     sigma.refresh();
-  }, [nodeSize, edgeSize, edgeOpacity, showLabels, showArrows, showIcons, labelSize, labelThreshold]);
+  }, [nodeSize, edgeSize, edgeOpacity, showLabels, showArrows, showIcons, labelSize, labelThreshold, edgeZoomThreshold]);
 
   // ─── Re-layout with current ForceAtlas2 params ───
   const reLayout = useCallback(() => {
@@ -1367,6 +1789,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
           slowDown,
           barnesHutOptimize: barnesHut,
           strongGravityMode: strongGravity,
+          linLogMode: true,
+          adjustSizes: true,
         },
       });
     } catch (error) {
@@ -1391,6 +1815,7 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
     setGravity(d.gravity); setScalingRatio(d.scalingRatio);
     setSlowDown(d.slowDown); setIterations(d.iterations);
     setBarnesHut(d.barnesHut); setStrongGravity(d.strongGravity);
+    setEdgeZoomThreshold(d.edgeZoomThreshold);
   };
 
   const handleFitView = () => {
@@ -1408,8 +1833,8 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
       <div className="sigma-graph-viewer">
         <div className="empty-state">
           <i className="bi bi-diagram-3" style={{ fontSize: '3rem', opacity: 0.5 }}></i>
-          <h3>Aucun graphe sélectionné</h3>
-          <p>Sélectionnez un graphe dans la liste pour le visualiser</p>
+          <h3>No graph selected</h3>
+          <p>Select a graph from the list to visualize it</p>
         </div>
       </div>
     );
@@ -1422,15 +1847,15 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
         <button onClick={handleFitView} title="Ajuster la vue">
           <i className="bi bi-arrows-fullscreen"></i> Fit
         </button>
-        <button onClick={handleZoomIn} title="Zoom avant">
+        <button onClick={handleZoomIn} title="Zoom in">
           <i className="bi bi-zoom-in"></i>
         </button>
-        <button onClick={handleZoomOut} title="Zoom arrière">
+        <button onClick={handleZoomOut} title="Zoom out">
           <i className="bi bi-zoom-out"></i>
         </button>
         <button
           onClick={() => setProgressiveMode(!progressiveMode)}
-          title={progressiveMode ? 'Mode normal' : 'Mode par niveaux'}
+          title={progressiveMode ? 'Normal mode' : 'Level mode'}
           style={{
             backgroundColor: progressiveMode ? '#4CAF50' : '#666',
             color: '#fff',
@@ -1438,13 +1863,13 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
           }}
         >
           <i className={progressiveMode ? 'bi bi-layers-fill' : 'bi bi-layers'}></i>
-          {' '}{progressiveMode ? 'Par niveaux' : 'Normal'}
+          {' '}{progressiveMode ? 'By level' : 'Normal'}
         </button>
         {progressiveMode && graphId && (
           <>
             <button
               onClick={loadPrevLevel}
-              title="Revenir au niveau précédent"
+              title="Go back to previous level"
               style={{ backgroundColor: visibleNodesHistory.length > 0 ? '#607D8B' : '#444' }}
               disabled={visibleNodesHistory.length === 0}
             >
@@ -1452,325 +1877,222 @@ const SigmaGraphViewer: React.FC<SigmaGraphViewerProps> = ({ data, graphId, onRe
             </button>
             <button
               onClick={loadNextLevel}
-              title="Charger +1 niveau"
+              title="Load +1 level"
               style={{ backgroundColor: '#2196F3' }}
             >
               <i className="bi bi-plus-circle"></i> +1
             </button>
             <button
               onClick={resetToStart}
-              title="Revenir au départ"
+              title="Back to start"
               style={{ backgroundColor: '#FF5722' }}
             >
               <i className="bi bi-arrow-counterclockwise"></i> Reset
             </button>
-            <button
-              onClick={() => { nodePositionCache.clearGraph(graphId); setLevelTimings([]); setBenchmarkResult(null); }}
-              title="Effacer le cache et les mesures"
-              style={{ backgroundColor: '#ff9800' }}
-            >
-              <i className="bi bi-trash"></i> Cache
-            </button>
+            <span style={{
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              color: '#fff',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}>
+              {visibleNodes.size} / {data?.nodes.length ?? 0} nodes
+            </span>
           </>
         )}
       </div>
 
-      {/* ─── Parameter panel (top-left) ─── */}
-      <div className="sigma-params-panel">
-        <div className="sigma-params-header" onClick={() => setPanelOpen(!panelOpen)}>
-          <span className="params-title">⚙️ Parameters</span>
-          <span className="params-toggle">{panelOpen ? '▼' : '▶'}</span>
+      {/* Edge zoom threshold control */}
+      {nc > 200 && (
+        <div className="sigma-edge-zoom-control">
+          <label title="Show edges only for visible nodes (like Google Maps). 0 = always show all, higher = tighter viewport filter">
+            🔗 Viewport edges
+            <input
+              type="range"
+              min="0" max="10" step="0.5"
+              value={edgeZoomThreshold}
+              onChange={e => setEdgeZoomThreshold(Number(e.target.value))}
+            />
+            <span>{edgeZoomThreshold === 0 ? 'All' : `×${edgeZoomThreshold}`}</span>
+          </label>
         </div>
+      )}
 
-        {panelOpen && (
-          <div className="sigma-params-body">
-            <div className="params-actions">
-              <button className="param-btn reset" onClick={resetParams}>Reset</button>
-              <button className="param-btn reheat" onClick={reLayout}>🔄 Re-layout</button>
-            </div>
-
-            <div className="params-section">
-              <div className="section-title">Nodes</div>
-              <label className="param-row">
-                <span className="param-label">Size <span className="param-value">{nodeSize}</span></span>
-                <input type="range" min="1" max="20" step="0.5" value={nodeSize}
-                  onChange={(e) => setNodeSize(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Hover size <span className="param-value">{hoverSize}</span></span>
-                <input type="range" min="2" max="30" step="1" value={hoverSize}
-                  onChange={(e) => setHoverSize(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row checkbox">
-                <input type="checkbox" checked={showLabels}
-                  onChange={(e) => setShowLabels(e.target.checked)} />
-                <span>Show labels</span>
-              </label>
-              <label className="param-row checkbox">
-                <input type="checkbox" checked={showIcons}
-                  onChange={(e) => setShowIcons(e.target.checked)} />
-                <span>Show icons</span>
-              </label>
-              <label className="param-row">
-                <span className="param-label">Label size <span className="param-value">{labelSize}</span></span>
-                <input type="range" min="6" max="20" step="1" value={labelSize}
-                  onChange={(e) => setLabelSize(parseInt(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Label threshold <span className="param-value">{labelThreshold}</span></span>
-                <input type="range" min="1" max="30" step="1" value={labelThreshold}
-                  onChange={(e) => setLabelThreshold(parseInt(e.target.value))} />
-              </label>
-            </div>
-
-            <div className="params-section">
-              <div className="section-title">ForceAtlas2</div>
-              <label className="param-row">
-                <span className="param-label">Gravity <span className="param-value">{gravity.toFixed(2)}</span></span>
-                <input type="range" min="0.01" max="5" step="0.01" value={gravity}
-                  onChange={(e) => setGravity(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Scaling ratio <span className="param-value">{scalingRatio}</span></span>
-                <input type="range" min="1" max="100" step="1" value={scalingRatio}
-                  onChange={(e) => setScalingRatio(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Slow down <span className="param-value">{slowDown.toFixed(1)}</span></span>
-                <input type="range" min="0.1" max="20" step="0.1" value={slowDown}
-                  onChange={(e) => setSlowDown(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Iterations <span className="param-value">{iterations}</span></span>
-                <input type="range" min="5" max="200" step="5" value={iterations}
-                  onChange={(e) => setIterations(parseInt(e.target.value))} />
-              </label>
-              <label className="param-row checkbox">
-                <input type="checkbox" checked={barnesHut}
-                  onChange={(e) => setBarnesHut(e.target.checked)} />
-                <span>Barnes-Hut optim.</span>
-              </label>
-              <label className="param-row checkbox">
-                <input type="checkbox" checked={strongGravity}
-                  onChange={(e) => setStrongGravity(e.target.checked)} />
-                <span>Strong gravity</span>
-              </label>
-            </div>
-
-            <div className="params-section">
-              <div className="section-title">Edges</div>
-              <label className="param-row">
-                <span className="param-label">Size <span className="param-value">{edgeSize.toFixed(1)}</span></span>
-                <input type="range" min="0.1" max="5" step="0.1" value={edgeSize}
-                  onChange={(e) => setEdgeSize(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row">
-                <span className="param-label">Opacity <span className="param-value">{edgeOpacity.toFixed(2)}</span></span>
-                <input type="range" min="0.05" max="1" step="0.05" value={edgeOpacity}
-                  onChange={(e) => setEdgeOpacity(parseFloat(e.target.value))} />
-              </label>
-              <label className="param-row checkbox">
-                <input type="checkbox" checked={showArrows}
-                  onChange={(e) => setShowArrows(e.target.checked)} />
-                <span>Show arrows</span>
-              </label>
-            </div>
-          </div>
-        )}
-      </div>
+    
 
       <div ref={containerRef} className="sigma-container" />
 
       {/* Node list panel for progressive mode */}
       {progressiveMode && data && (
         <div className="sigma-node-list-panel">
-          <div className="node-list-header">
-            <strong><i className="bi bi-list-ul"></i> Liste des nœuds</strong>
-            <span className="node-list-count">
-              {data.nodes.length > MAX_NODE_LIST
-                ? `${MAX_NODE_LIST} / ${data.nodes.length.toLocaleString()} (échantillon)`
-                : `${data.nodes.length} nœuds`
-              }
-            </span>
+          {/* Tab toggle */}
+          <div className="node-list-tabs">
+            <button
+              className={nodeListMode === 'search' ? 'active' : ''}
+              onClick={() => setNodeListMode('search')}
+            >
+              <i className="bi bi-search"></i> Search
+            </button>
+            <button
+              className={nodeListMode === 'visible' ? 'active' : ''}
+              onClick={() => setNodeListMode('visible')}
+            >
+              <i className="bi bi-eye"></i> Visible ({visibleNodes.size})
+            </button>
           </div>
-          <div className="node-list-search">
-            <i className="bi bi-search"></i>
-            <input
-              type="text"
-              placeholder="Filtrer par id, label ou type..."
-              value={nodeListFilter}
-              onChange={(e) => setNodeListFilter(e.target.value)}
-            />
-            {nodeListFilter && (
-              <button className="node-list-clear" onClick={() => setNodeListFilter('')}>
-                <i className="bi bi-x-lg"></i>
-              </button>
-            )}
-          </div>
-          <div className="node-list-items">
-            {filteredNodeList.map((node) => {
-              const isExplored = exploredNodes.has(node.id);
-              const isVisible = visibleNodes.has(node.id);
-              const color = NODE_COLORS[node.node_type || 'default'] || generateColorFromString(node.node_type || 'default');
-              return (
-                <div
-                  key={node.id}
-                  className={`node-list-item ${isExplored ? 'explored' : ''} ${isVisible ? 'visible' : ''}`}
-                  onClick={() => exploreNode(node.id)}
-                  title={`Cliquer pour explorer ${node.id} et ses voisins`}
+
+          {nodeListMode === 'search' ? (
+            <>
+              <div className="node-list-header">
+                <strong><i className="bi bi-list-ul"></i> Node list</strong>
+                <span className="node-list-count">
+                  {data.nodes.length > MAX_NODE_LIST
+                    ? `${MAX_NODE_LIST} / ${data.nodes.length.toLocaleString()} (sample)`
+                    : `${data.nodes.length} nodes`
+                  }
+                </span>
+              </div>
+              <div className="node-list-impact-toggle">
+                <button
+                  className={`impact-mode-btn ${impactMode ? 'active' : ''}`}
+                  onClick={() => setImpactMode(!impactMode)}
+                  title="Toggle impact analysis mode"
                 >
-                  <span
-                    className="node-list-dot"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="node-list-id">{node.id}</span>
-                  <span className="node-list-label">{node.label || ''}</span>
-                  <span className="node-list-type">{node.node_type || ''}</span>
-                  {isExplored && <i className="bi bi-check-circle-fill node-list-check"></i>}
-                </div>
-              );
-            })}
-            {filteredNodeList.length === 0 && (
-              <div className="node-list-empty">
-                <i className="bi bi-emoji-frown"></i> Aucun nœud trouvé
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {progressiveMode && data && (
-        <div className="sigma-progressive-info">
-          <strong><i className="bi bi-diagram-3"></i> Mode par niveaux</strong>
-          <p><i className="bi bi-signpost-split"></i> Profondeur : {currentDepth}</p>
-          <p>
-            <i className="bi bi-circle-fill" style={{ fontSize: '0.6em' }}></i>{' '}
-            {visibleNodes.size.toLocaleString()} / {data.nodes.length.toLocaleString()} nœuds
-            {' '}({((visibleNodes.size / data.nodes.length) * 100).toFixed(1)}%)
-          </p>
-          {visibleNodes.size >= data.nodes.length && (
-            <p style={{ color: '#4CAF50' }}>
-              <i className="bi bi-check-circle-fill"></i> Graphe entièrement visible
-            </p>
-          )}
-
-          {/* Benchmark result */}
-          {benchmarkResult && (
-            <div className="benchmark-result">
-              <strong><i className="bi bi-speedometer2"></i> Benchmark (Niveau {benchmarkResult.depth})</strong>
-              <div className="benchmark-row">
-                <span className="benchmark-label"> Cache</span>
-                <span className="benchmark-value">{benchmarkResult.cachedMs.toFixed(1)}ms</span>
-                <span className="benchmark-detail">(layout: {benchmarkResult.cachedLayoutMs.toFixed(1)}ms)</span>
-              </div>
-              <div className="benchmark-row">
-                <span className="benchmark-label"> Raw</span>
-                <span className="benchmark-value">{benchmarkResult.rawMs.toFixed(1)}ms</span>
-                <span className="benchmark-detail">(layout: {benchmarkResult.rawLayoutMs.toFixed(1)}ms)</span>
-              </div>
-              <div className="benchmark-gain">
-                {benchmarkResult.rawMs > benchmarkResult.cachedMs ? (
-                  <>
-                    <i className="bi bi-arrow-up-circle-fill" style={{ color: '#4CAF50' }}></i>{' '}
-                    <span style={{ color: '#4CAF50' }}>
-                      Cache <strong>{((1 - benchmarkResult.cachedMs / benchmarkResult.rawMs) * 100).toFixed(0)}%</strong> plus rapide
-                    </span>
-                    <br />
-                    <span style={{ fontSize: '10px', opacity: 0.7 }}>
-                      {benchmarkResult.nodesAdded} nœuds ajoutés • {benchmarkResult.totalNodes} total
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ color: '#FF9800' }}>
-                    <i className="bi bi-dash-circle"></i> Pas de gain ({benchmarkResult.nodesAdded} nœuds)
-                  </span>
+                  <i className="bi bi-lightning-charge-fill"></i>
+                  {impactMode ? ' Impact ON' : ' Impact'}
+                </button>
+                {impactMode && (
+                  <label className="impact-depth-control">
+                    Depth:
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={impactDepth}
+                      onChange={(e) => setImpactDepth(Math.max(1, Math.min(20, Number(e.target.value))))}
+                    />
+                  </label>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* Timing history */}
-          {levelTimings.length > 0 && (
-            <div className="level-timings">
-              <strong><i className="bi bi-clock-history"></i> Historique</strong>
-              <div className="timings-table">
-                <div className="timings-header">
-                  <span>Niv.</span><span>+Nœuds</span><span>Total</span><span>Layout</span><span>Mode</span>
-                </div>
-                {levelTimings.slice(-8).map((t, i) => (
-                  <div key={i} className="timings-row">
-                    <span>{t.depth}</span>
-                    <span>+{t.nodesAdded}</span>
-                    <span>{t.timeMs.toFixed(0)}ms</span>
-                    <span>{t.layoutMs.toFixed(0)}ms</span>
-                    <span className={t.cached ? 'cache-on' : 'cache-off'}>
-                      {t.cached ? '🟢' : '🔴'}
-                    </span>
-                  </div>
-                ))}
+              <div className="node-list-search">
+                <i className="bi bi-search"></i>
+                <input
+                  type="text"
+                  placeholder="Filter by id, label or type..."
+                  value={nodeListFilter}
+                  onChange={(e) => setNodeListFilter(e.target.value)}
+                />
+                {nodeListFilter && (
+                  <button className="node-list-clear" onClick={() => setNodeListFilter('')}>
+                    <i className="bi bi-x-lg"></i>
+                  </button>
+                )}
               </div>
-              {(() => {
-                const ce = levelTimings.filter(t => t.cached);
-                const re = levelTimings.filter(t => !t.cached);
-                if (ce.length > 0 && re.length > 0) {
-                  const avgC = ce.reduce((s, t) => s + t.timeMs, 0) / ce.length;
-                  const avgR = re.reduce((s, t) => s + t.timeMs, 0) / re.length;
-                  const gain = ((1 - avgC / avgR) * 100);
+              <div className="node-list-items">
+                {filteredNodeList.map((node) => {
+                  const isExplored = exploredNodes.has(node.id);
+                  const isVisible = visibleNodes.has(node.id);
+                  const color = NODE_COLORS[node.node_type || 'default'] || generateColorFromString(node.node_type || 'default');
                   return (
-                    <div className="timings-summary">
-                      <span>Moy. cache: <strong>{avgC.toFixed(0)}ms</strong> ({ce.length} runs)</span>
-                      <span>Moy. raw: <strong>{avgR.toFixed(0)}ms</strong> ({re.length} runs)</span>
-                      {gain > 0 ? (
-                        <span style={{ color: '#4CAF50' }}> Gain: <strong>{gain.toFixed(0)}%</strong></span>
-                      ) : (
-                        <span style={{ color: '#FF9800' }}>Pas de gain significatif</span>
-                      )}
+                    <div
+                      key={node.id}
+                      className={`node-list-item ${isExplored ? 'explored' : ''} ${isVisible ? 'visible' : ''}`}
+                      onClick={() => impactMode ? impactExplore(node.id) : exploreNode(node.id)}
+                      title={impactMode ? `Impact analysis from ${node.id} (depth ${impactDepth})` : `Click to explore ${node.id} and its neighbors`}
+                    >
+                      <span className="node-list-dot" style={{ backgroundColor: color }} />
+                      <span className="node-list-id">{node.id}</span>
+                      <span className="node-list-label">{node.label || ''}</span>
+                      <span className="node-list-type">{node.node_type || ''}</span>
+                      {isExplored && <i className="bi bi-check-circle-fill node-list-check"></i>}
                     </div>
                   );
-                }
-                return null;
-              })()}
-            </div>
+                })}
+                {filteredNodeList.length === 0 && (
+                  <div className="node-list-empty">
+                    <i className="bi bi-emoji-frown"></i> No node found
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="node-list-header">
+                <strong><i className="bi bi-eye"></i> Visible nodes</strong>
+                <span className="node-list-count">{visibleNodes.size} nodes</span>
+              </div>
+              <div className="node-list-search">
+                <i className="bi bi-search"></i>
+                <input
+                  type="text"
+                  placeholder="Filter visible nodes..."
+                  value={visibleListFilter}
+                  onChange={(e) => setVisibleListFilter(e.target.value)}
+                />
+                {visibleListFilter && (
+                  <button className="node-list-clear" onClick={() => setVisibleListFilter('')}>
+                    <i className="bi bi-x-lg"></i>
+                  </button>
+                )}
+              </div>
+              <div className="node-list-items">
+                {visibleNodesList.map((node) => {
+                  const color = NODE_COLORS[node.node_type || 'default'] || generateColorFromString(node.node_type || 'default');
+                  return (
+                    <div
+                      key={node.id}
+                      className="node-list-item visible"
+                      onClick={() => {
+                        if (!sigmaRef.current || !graphRef.current) return;
+                        const graph = graphRef.current;
+                        if (!graph.hasNode(node.id)) return;
+                        const sigma = sigmaRef.current;
+                        const attrs = graph.getNodeAttributes(node.id);
+                        const vp = sigma.graphToViewport({ x: attrs.x, y: attrs.y });
+                        const fp = sigma.viewportToFramedGraph(vp);
+                        sigma.getCamera().animate(
+                          { x: fp.x, y: fp.y, ratio: Math.min(sigma.getCamera().ratio, 0.15) },
+                          { duration: 400 },
+                        );
+                      }}
+                      title={`Click to focus on ${node.id}`}
+                    >
+                      <span className="node-list-dot" style={{ backgroundColor: color }} />
+                      <span className="node-list-id">{node.id}</span>
+                      <span className="node-list-label">{node.label || ''}</span>
+                      <span className="node-list-type">{node.node_type || ''}</span>
+                    </div>
+                  );
+                })}
+                {visibleNodesList.length === 0 && (
+                  <div className="node-list-empty">
+                    <i className="bi bi-emoji-frown"></i> No visible nodes
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
+
+      
 
       {hoveredNode && (
         <div className="sigma-tooltip">
-          <i className="bi bi-cursor-fill"></i> <strong>Nœud :</strong> {hoveredNode}
+          <i className="bi bi-cursor-fill"></i> <strong>Node:</strong> {hoveredNode}
         </div>
       )}
 
-      {renderTime !== null && (
-        <div className="sigma-render-time">
-          <i className="bi bi-stopwatch"></i> <strong>Sigma.js:</strong> {renderTime.toFixed(0)}ms
-          {data.nodes.length > 5000 && (
-            <span className="optimization-note"> <i className="bi bi-lightning-charge-fill"></i> optimisé</span>
-          )}
-        </div>
-      )}
+     
 
-      {timingDetails && (
-        <div className="sigma-timing-details">
-          <button className="timing-toggle" onClick={() => setTimingOpen(!timingOpen)}>
-             Timing details {timingOpen ? '▼' : '▶'}
-          </button>
-          {timingOpen && (
-            <div className="timing-breakdown">
-              <span className="timing-badge graph">Graph build: <strong>{timingDetails.graphBuild.toFixed(1)}ms</strong></span>
-              <span className="timing-badge layout">Layout: <strong>{timingDetails.layout.toFixed(1)}ms</strong></span>
-              <span className="timing-badge init">Sigma init: <strong>{timingDetails.sigmaInit.toFixed(1)}ms</strong></span>
-              <span className="timing-badge events">Events: <strong>{timingDetails.events.toFixed(1)}ms</strong></span>
-              <span className="timing-badge render">WebGL render: <strong>{timingDetails.webglRender.toFixed(1)}ms</strong></span>
-            </div>
-          )}
-        </div>
-      )}
+    
 
       <div className="sigma-stats">
-        <span><i className="bi bi-circle-fill" style={{ fontSize: '0.6em' }}></i> {data.nodes.length} nœuds</span>
+        <span><i className="bi bi-circle-fill" style={{ fontSize: '0.6em' }}></i> {data.nodes.length} nodes</span>
         <span>•</span>
-        <span><i className="bi bi-arrow-right" style={{ fontSize: '0.8em' }}></i> {data.edges.length} arêtes</span>
+        <span><i className="bi bi-arrow-right" style={{ fontSize: '0.8em' }}></i> {data.edges.length} edges</span>
       </div>
 
       <FpsCounter recording={renderTime !== null} />

@@ -192,6 +192,18 @@ export class MssqlService implements GraphDatabaseService {
     return { rows, elapsed_ms, rowCount: rows.length, engine: this.engineName };
   }
 
+  async executeMultiQuery(
+    query: string,
+    database?: string,
+  ): Promise<{ recordsets: Record<string, any>[][]; elapsed_ms: number; engine: string }> {
+    const pool = await this.getPool(database);
+    const t0 = Date.now();
+    const result = await pool.request().query(query);
+    const elapsed_ms = Date.now() - t0;
+    const recordsets = (result.recordsets || [result.recordset || []]) as Record<string, any>[][];
+    return { recordsets, elapsed_ms, engine: this.engineName };
+  }
+
   async close(): Promise<void> {
     for (const pool of this.pools.values()) {
       await pool.close();
@@ -984,6 +996,33 @@ export class MssqlService implements GraphDatabaseService {
           _enriched: true,
           _enriched_at: new Date().toISOString(),
         };
+      }
+
+      // Capacity exceeded detection
+      let capBatchSql = `CREATE TABLE #cap_ids (asset_id INT PRIMARY KEY);\n`;
+      for (let i = 0; i < assetIds.length; i += ID_BATCH) {
+        const batch = assetIds.slice(i, i + ID_BATCH);
+        capBatchSql += `INSERT INTO #cap_ids (asset_id) VALUES ${batch.map(id => `(${id})`).join(",")};\n`;
+      }
+      capBatchSql += `
+        SELECT DISTINCT ac.ASSET_ID
+        FROM #cap_ids ci
+        INNER JOIN [${schema}].AM_ASSET_CHARACTERISTICS ac ON ac.ASSET_ID = ci.asset_id
+        INNER JOIN [${schema}].AM_CHARACTERISTICS ch ON ac.CHARACTERISTIC_ID = ch.CHARACTERISTIC_ID
+        WHERE ch.IS_CAPACITY = 1
+          AND ac.CAPACITY_VALUE IS NOT NULL AND ac.MAX_TARGET IS NOT NULL
+          AND ac.CAPACITY_VALUE > ac.MAX_TARGET;
+        DROP TABLE #cap_ids;
+      `;
+      try {
+        const capResult = await pool.request().query(capBatchSql);
+        const capRows = (capResult.recordsets as any[])[0] || [];
+        const exceededIds = new Set(capRows.map((r: any) => r.ASSET_ID as number));
+        for (const [assetId, node] of assetMap) {
+          node.properties.capacityExceeded = exceededIds.has(assetId);
+        }
+      } catch (capErr) {
+        console.warn("Capacity check skipped (table may not exist):", (capErr as Error).message);
       }
     } catch (err) {
       console.warn("EasyVista enrichment failed (tables may not exist in this DB):", (err as Error).message);

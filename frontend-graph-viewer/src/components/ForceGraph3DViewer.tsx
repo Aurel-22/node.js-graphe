@@ -18,6 +18,8 @@ interface Node3D {
   type: string;
   color: string;
   val: number;
+  capacityExceeded?: boolean;
+  requestCount?: number;
   x?: number;
   y?: number;
   z?: number;
@@ -60,9 +62,8 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
   const [nodeOpacity, setNodeOpacity] = useState(0.9);
   const [linkOpacity, setLinkOpacity] = useState(0.4);
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  // Legend
-  const [nodeTypes, setNodeTypes] = useState<Array<{ type: string; color: string; count: number }>>([]);
+  const [nodeListOpen, setNodeListOpen] = useState(false);
+  const [nodeListFilter, setNodeListFilter] = useState('');
 
   // Neighbor map for hover highlight
   const neighborMap = useRef<Map<string, Set<string>>>(new Map());
@@ -82,6 +83,8 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
       type: node.node_type,
       color: getNodeColor(node.node_type),
       val: nodeCount > 10000 ? 2 : nodeCount > 5000 ? 4 : nodeCount > 1000 ? 6 : 10,
+      capacityExceeded: !!node.properties?.capacityExceeded,
+      requestCount: node.properties?.requestCount || 0,
     }));
 
     const links: Link3D[] = data.edges.map((edge) => ({
@@ -101,24 +104,6 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
       nMap.get(edge.target)!.add(edge.source);
     });
     neighborMap.current = nMap;
-
-    // Compute legend
-    const typeMap = new Map<string, { color: string; count: number }>();
-    nodes.forEach((node) => {
-      const existing = typeMap.get(node.type);
-      if (existing) {
-        existing.count++;
-      } else {
-        typeMap.set(node.type, { color: node.color, count: 1 });
-      }
-    });
-
-    const typesArray = Array.from(typeMap.entries())
-      .map(([type, { color, count }]) => ({ type, color, count }))
-      .sort((a, b) => b.count - a.count);
-
-    // Set legend outside render
-    setTimeout(() => setNodeTypes(typesArray), 0);
 
     dataPrepTimeRef.current = performance.now() - startTimeRef.current;
     performance.mark('ForceGraph3D:dataReady');
@@ -190,6 +175,17 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
 
   // Adaptive settings
   const nodeCount = graphData3D?.nodes.length || 0;
+
+  // Filtered + sorted node list for the panel
+  const filteredNodes = useMemo(() => {
+    if (!graphData3D) return [];
+    const filter = nodeListFilter.toLowerCase();
+    const list = filter
+      ? graphData3D.nodes.filter(n => n.name.toLowerCase().includes(filter) || n.id.toLowerCase().includes(filter) || n.type.toLowerCase().includes(filter))
+      : graphData3D.nodes;
+    return [...list].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 500);
+  }, [graphData3D, nodeListFilter]);
+
   const adaptiveShowLabels = nodeCount > 5000 ? false : showLabels;
   const adaptiveArrowLength = showArrows ? (nodeCount > 5000 ? 2 : nodeCount > 1000 ? 3 : 5) : 0;
   const warmupTicks = nodeCount > 10000 ? 50 : nodeCount > 5000 ? 80 : 100;
@@ -256,6 +252,58 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
         sphere.add(sprite);
       }
 
+      // Badge for capacity exceeded
+      if (node.capacityExceeded) {
+        const badgeRadius = radius * 0.45;
+        const badgeGeometry = new THREE.SphereGeometry(badgeRadius, 12, 8);
+        const badgeMaterial = new THREE.MeshBasicMaterial({ color: '#F44336' });
+        const badge = new THREE.Mesh(badgeGeometry, badgeMaterial);
+        badge.position.set(radius * 0.7, -radius * 0.7, radius * 0.5);
+
+        const bCanvas = document.createElement('canvas');
+        bCanvas.width = 64;
+        bCanvas.height = 64;
+        const bCtx = bCanvas.getContext('2d')!;
+        bCtx.font = 'bold 48px sans-serif';
+        bCtx.fillStyle = '#ffffff';
+        bCtx.textAlign = 'center';
+        bCtx.textBaseline = 'middle';
+        bCtx.fillText('!', 32, 32);
+        const bTexture = new THREE.CanvasTexture(bCanvas);
+        const bSpriteMat = new THREE.SpriteMaterial({ map: bTexture, transparent: true });
+        const bSprite = new THREE.Sprite(bSpriteMat);
+        bSprite.scale.set(badgeRadius * 2.5, badgeRadius * 2.5, 1);
+        bSprite.position.set(radius * 0.7, -radius * 0.7, radius * 0.5);
+        sphere.add(badge);
+        sphere.add(bSprite);
+      }
+
+      // Badge for request count (bottom-left, blue)
+      if (node.requestCount && node.requestCount > 0) {
+        const rcBadgeRadius = radius * 0.45;
+        const rcGeometry = new THREE.SphereGeometry(rcBadgeRadius, 12, 8);
+        const rcMaterial = new THREE.MeshBasicMaterial({ color: '#2196F3' });
+        const rcBadge = new THREE.Mesh(rcGeometry, rcMaterial);
+        rcBadge.position.set(-radius * 0.7, -radius * 0.7, radius * 0.5);
+
+        const rcCanvas = document.createElement('canvas');
+        rcCanvas.width = 64;
+        rcCanvas.height = 64;
+        const rcCtx = rcCanvas.getContext('2d')!;
+        rcCtx.font = 'bold 40px sans-serif';
+        rcCtx.fillStyle = '#ffffff';
+        rcCtx.textAlign = 'center';
+        rcCtx.textBaseline = 'middle';
+        rcCtx.fillText(String(node.requestCount), 32, 32);
+        const rcTexture = new THREE.CanvasTexture(rcCanvas);
+        const rcSpriteMat = new THREE.SpriteMaterial({ map: rcTexture, transparent: true });
+        const rcSprite = new THREE.Sprite(rcSpriteMat);
+        rcSprite.scale.set(rcBadgeRadius * 2.5, rcBadgeRadius * 2.5, 1);
+        rcSprite.position.set(-radius * 0.7, -radius * 0.7, radius * 0.5);
+        sphere.add(rcBadge);
+        sphere.add(rcSprite);
+      }
+
       return sphere;
     },
     [highlightNodes, hoverNode, nodeOpacity, nodeCount, adaptiveShowLabels]
@@ -267,7 +315,7 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
       <div className="force-graph-3d-viewer">
         <div className="empty-state">
           <h2>3D Graph Viewer</h2>
-          <p>Sélectionnez un graphe pour le visualiser en 3D</p>
+          <p>Select a graph to visualize it in 3D</p>
         </div>
       </div>
     );
@@ -417,53 +465,58 @@ const ForceGraph3DViewer: React.FC<ForceGraph3DViewerProps> = ({ data, onRenderC
         </div>
       )}
 
-      {/* Timing details */}
-      {timingDetails && (
-        <div className="render-time-details">
-          <button className="timing-toggle" onClick={() => setTimingOpen(!timingOpen)}>
-            ⏱️ Timing details {timingOpen ? '▼' : '▶'}
-          </button>
-          {timingOpen && (
-            <div className="timing-breakdown">
-              <span className="timing-badge data">
-                Data prep: <strong>{timingDetails.dataPrep.toFixed(1)}ms</strong>
-              </span>
-              <span className="timing-badge sim">
-                Simulation: <strong>{timingDetails.simulation.toFixed(1)}ms</strong>
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+    
 
       {/* FPS Counter */}
       <FpsCounter recording={renderTime === null && !!graphData3D} />
 
-      {/* Legend */}
-      {nodeTypes.length > 0 && (
-        <div className="graph-legend">
-          <h3>Types ({nodeTypes.length})</h3>
-          <div className="legend-items-scroll">
-            <div className="legend-items">
-              {nodeTypes.slice(0, 30).map(({ type, color, count }) => (
-                <div key={type} className="legend-item">
-                  <div
-                    className="legend-color"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="legend-label">{type}</span>
-                  <span className="legend-count">{count}</span>
+      {/* Collapsible node list panel */}
+      <div className={`node-list-panel-3d ${nodeListOpen ? 'open' : ''}`}>
+        <button className="node-list-toggle-3d" onClick={() => setNodeListOpen(!nodeListOpen)}>
+          <i className={`bi bi-chevron-${nodeListOpen ? 'down' : 'up'}`}></i>
+          {' '}Nodes ({graphData3D.nodes.length.toLocaleString()})
+        </button>
+        {nodeListOpen && (
+          <div className="node-list-body-3d">
+            <input
+              type="text"
+              className="node-list-search-3d"
+              placeholder="Filtrer par nom, id ou type..."
+              value={nodeListFilter}
+              onChange={e => setNodeListFilter(e.target.value)}
+            />
+            <div className="node-list-scroll-3d">
+              {filteredNodes.map(node => (
+                <div
+                  key={node.id}
+                  className="node-list-item-3d"
+                  onClick={() => {
+                    const n = graphData3D.nodes.find(n => n.id === node.id);
+                    if (n && graphRef.current) {
+                      const distance = 120;
+                      const distRatio = 1 + distance / Math.hypot(n.x || 0, n.y || 0, n.z || 0);
+                      graphRef.current.cameraPosition(
+                        { x: (n.x || 0) * distRatio, y: (n.y || 0) * distRatio, z: (n.z || 0) * distRatio },
+                        n, 1000
+                      );
+                    }
+                  }}
+                >
+                  <span className="node-list-color-3d" style={{ background: node.color }}></span>
+                  <span className="node-list-name-3d">{node.name}</span>
+                  <span className="node-list-type-3d">{node.type}</span>
                 </div>
               ))}
-              {nodeTypes.length > 30 && (
-                <div className="legend-item" style={{ opacity: 0.5, fontSize: 11 }}>
-                  +{nodeTypes.length - 30} more types...
-                </div>
+              {filteredNodes.length === 0 && (
+                <div className="node-list-empty-3d">Aucun nœud trouvé</div>
+              )}
+              {graphData3D.nodes.length > 500 && !nodeListFilter && (
+                <div className="node-list-truncated-3d">Affichage limité à 500 / {graphData3D.nodes.length.toLocaleString()}</div>
               )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };

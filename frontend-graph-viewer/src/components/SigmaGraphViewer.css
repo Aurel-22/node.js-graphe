@@ -4,7 +4,6 @@
   height: 100%;
   background: linear-gradient(135deg, var(--graph-bg, #0f1419) 0%, var(--graph-bg-end, #16213e) 100%);
   overflow: hidden;
-  border-radius: 12px;
 }
 
 .sigma-container {
@@ -253,6 +252,40 @@
   backdrop-filter: blur(10px);
   border: 1px solid rgba(102, 126, 234, 0.3);
   z-index: 10;
+}
+
+/* ─── Edge Zoom Threshold Control ─── */
+.sigma-edge-zoom-control {
+  position: absolute;
+  top: 70px;
+  right: 20px;
+  z-index: 10;
+  background: var(--bg-overlay, rgba(15, 20, 25, 0.9));
+  padding: 8px 14px;
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.sigma-edge-zoom-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.sigma-edge-zoom-control input[type="range"] {
+  width: 80px;
+  accent-color: #667eea;
+}
+
+.sigma-edge-zoom-control span {
+  min-width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── Parameter Panel (dark theme) ─── */
@@ -504,6 +537,35 @@
   overflow: hidden;
 }
 
+.node-list-tabs {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.node-list-tabs button {
+  flex: 1;
+  padding: 8px 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.node-list-tabs button:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.node-list-tabs button.active {
+  color: #fff;
+  border-bottom-color: #4da6ff;
+  background: rgba(77, 166, 255, 0.1);
+  font-weight: 600;
+}
+
 .node-list-header {
   padding: 10px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -520,6 +582,56 @@
 .node-list-count {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+.node-list-impact-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.impact-mode-btn {
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 152, 0, 0.4);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 152, 0, 0.7);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.impact-mode-btn:hover {
+  background: rgba(255, 152, 0, 0.15);
+  color: #FF9800;
+}
+
+.impact-mode-btn.active {
+  background: rgba(255, 87, 34, 0.25);
+  border-color: #FF5722;
+  color: #FF5722;
+  font-weight: 600;
+}
+
+.impact-depth-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.75rem;
+}
+
+.impact-depth-control input {
+  width: 44px;
+  padding: 2px 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #fff;
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .node-list-search {
@@ -616,12 +728,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary, rgba(255, 255, 255, 0.1));
 }
 
 .node-list-type {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-muted, rgba(255, 255, 255, 0.35));
   font-style: italic;
 }
 

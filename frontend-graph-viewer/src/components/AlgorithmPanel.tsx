@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { GraphData } from '../types/graph';
 import {
   algorithmApi,
@@ -29,27 +29,27 @@ interface AlgorithmConfig {
 }
 
 const ALGORITHMS: AlgorithmConfig[] = [
-  // Parcours
-  { id: 'bfs', label: 'BFS', category: 'Parcours', needsSource: true, needsTarget: false, description: 'Parcours en largeur depuis un nœud source' },
-  { id: 'dfs', label: 'DFS', category: 'Parcours', needsSource: true, needsTarget: false, description: 'Parcours en profondeur depuis un nœud source' },
-  { id: 'bidirectional-bfs', label: 'BFS Bidirectionnel', category: 'Parcours', needsSource: true, needsTarget: true, description: 'Plus court chemin entre 2 nœuds (BFS bidirectionnel)' },
-  { id: 'dijkstra', label: 'Dijkstra', category: 'Parcours', needsSource: true, needsTarget: false, description: 'Plus court chemin pondéré (optionnel: nœud cible)' },
-  // Centralité
-  { id: 'degree-centrality', label: 'Degree Centrality', category: 'Centralité', needsSource: false, needsTarget: false, description: 'Centralité de degré — CIs les plus connectés' },
-  { id: 'betweenness-centrality', label: 'Betweenness Centrality', category: 'Centralité', needsSource: false, needsTarget: false, description: 'Centralité d\'intermédiarité (Brandes) — CIs critiques' },
-  { id: 'closeness-centrality', label: 'Closeness Centrality', category: 'Centralité', needsSource: false, needsTarget: false, description: 'Centralité de proximité — CIs atteignant les autres rapidement' },
-  { id: 'pagerank', label: 'PageRank', category: 'Centralité', needsSource: false, needsTarget: false, description: 'Importance récursive itérative' },
-  // Communautés
-  { id: 'louvain', label: 'Louvain', category: 'Communautés', needsSource: false, needsTarget: false, description: 'Détection de communautés par optimisation de modularité' },
-  { id: 'label-propagation', label: 'Label Propagation', category: 'Communautés', needsSource: false, needsTarget: false, description: 'Clustering rapide par propagation d\'étiquettes' },
-  { id: 'connected-components', label: 'Composantes Connexes', category: 'Communautés', needsSource: false, needsTarget: false, description: 'Composantes faiblement connexes (non-orienté)' },
-  { id: 'strongly-connected-components', label: 'SCC (Tarjan)', category: 'Communautés', needsSource: false, needsTarget: false, description: 'Composantes fortement connexes — cycles de dépendances' },
+  // Traversal
+  { id: 'bfs', label: 'BFS', category: 'Traversal', needsSource: true, needsTarget: false, description: 'Breadth-first search from a source node' },
+  { id: 'dfs', label: 'DFS', category: 'Traversal', needsSource: true, needsTarget: false, description: 'Depth-first search from a source node' },
+  { id: 'bidirectional-bfs', label: 'Bidirectional BFS', category: 'Traversal', needsSource: true, needsTarget: true, description: 'Shortest path between 2 nodes (bidirectional BFS)' },
+  { id: 'dijkstra', label: 'Dijkstra', category: 'Traversal', needsSource: true, needsTarget: false, description: 'Weighted shortest path (optional: target node)' },
+  // Centrality
+  { id: 'degree-centrality', label: 'Degree Centrality', category: 'Centrality', needsSource: false, needsTarget: false, description: 'Degree centrality — most connected CIs' },
+  { id: 'betweenness-centrality', label: 'Betweenness Centrality', category: 'Centrality', needsSource: false, needsTarget: false, description: 'Betweenness centrality (Brandes) — critical CIs' },
+  { id: 'closeness-centrality', label: 'Closeness Centrality', category: 'Centrality', needsSource: false, needsTarget: false, description: 'Closeness centrality — CIs reaching others quickly' },
+  { id: 'pagerank', label: 'PageRank', category: 'Centrality', needsSource: false, needsTarget: false, description: 'Iterative recursive importance' },
+  // Communities
+  { id: 'louvain', label: 'Louvain', category: 'Communities', needsSource: false, needsTarget: false, description: 'Community detection by modularity optimization' },
+  { id: 'label-propagation', label: 'Label Propagation', category: 'Communities', needsSource: false, needsTarget: false, description: 'Fast clustering by label propagation' },
+  { id: 'connected-components', label: 'Connected Components', category: 'Communities', needsSource: false, needsTarget: false, description: 'Weakly connected components (undirected)' },
+  { id: 'strongly-connected-components', label: 'SCC (Tarjan)', category: 'Communities', needsSource: false, needsTarget: false, description: 'Strongly connected components — dependency cycles' },
   // Structure
-  { id: 'topological-sort', label: 'Tri Topologique', category: 'Structure', needsSource: false, needsTarget: false, description: 'Ordre de déploiement (DAG) + détection de cycles' },
-  { id: 'cascading-failure', label: 'Panne en Cascade', category: 'Résilience', needsSource: true, needsTarget: false, description: 'Simulation de propagation de panne' },
+  { id: 'topological-sort', label: 'Topological Sort', category: 'Structure', needsSource: false, needsTarget: false, description: 'Deployment order (DAG) + cycle detection' },
+  { id: 'cascading-failure', label: 'Cascading Failure', category: 'Resilience', needsSource: true, needsTarget: false, description: 'Failure propagation simulation' },
 ];
 
-const CATEGORIES = ['Parcours', 'Centralité', 'Communautés', 'Structure', 'Résilience'];
+const CATEGORIES = ['Traversal', 'Centrality', 'Communities', 'Structure', 'Resilience'];
 
 const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database, engine }) => {
   const [selectedAlgo, setSelectedAlgo] = useState<string>('bfs');
@@ -105,7 +105,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
       );
       setResult(res);
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Erreur inconnue');
+      setError(err?.response?.data?.error || err.message || 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -115,7 +115,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
     <div className="algorithm-panel">
       {/* Left: Algorithm selection */}
       <div className="algo-sidebar">
-        <h3>Algorithmes</h3>
+        <h3>Algorithms</h3>
         {CATEGORIES.map((cat) => (
           <div key={cat} className="algo-category">
             <h4>{cat}</h4>
@@ -144,12 +144,12 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Source node */}
           {algoConfig?.needsSource && (
             <div className="param-group">
-              <label>Nœud source</label>
+              <label>Source node</label>
               <input
                 type="text"
                 value={sourceNode}
                 onChange={(e) => setSourceNode(e.target.value)}
-                placeholder="ID du nœud source..."
+                placeholder="Source node ID..."
                 list="source-nodes-list"
               />
               <datalist id="source-nodes-list">
@@ -165,12 +165,12 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Target node */}
           {(algoConfig?.needsTarget || selectedAlgo === 'dijkstra') && (
             <div className="param-group">
-              <label>Nœud cible {selectedAlgo === 'dijkstra' ? '(optionnel)' : ''}</label>
+              <label>Target node {selectedAlgo === 'dijkstra' ? '(optional)' : ''}</label>
               <input
                 type="text"
                 value={targetNode}
                 onChange={(e) => setTargetNode(e.target.value)}
-                placeholder="ID du nœud cible..."
+                placeholder="Target node ID..."
                 list="target-nodes-list"
               />
               <datalist id="target-nodes-list">
@@ -186,7 +186,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Depth */}
           {(selectedAlgo === 'bfs' || selectedAlgo === 'dfs') && (
             <div className="param-group">
-              <label>Profondeur max: {depth}</label>
+              <label>Max depth: {depth}</label>
               <input
                 type="range"
                 min={1}
@@ -200,7 +200,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Iterations (PageRank, Label Propagation) */}
           {(selectedAlgo === 'pagerank' || selectedAlgo === 'label-propagation') && (
             <div className="param-group">
-              <label>Itérations: {iterations}</label>
+              <label>Iterations: {iterations}</label>
               <input
                 type="range"
                 min={1}
@@ -228,7 +228,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Threshold (Cascading failure) */}
           {selectedAlgo === 'cascading-failure' && (
             <div className="param-group">
-              <label>Seuil de défaillance: {threshold}</label>
+              <label>Failure threshold: {threshold}</label>
               <input
                 type="range"
                 min={0}
@@ -242,7 +242,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Sample size (Betweenness) */}
           {selectedAlgo === 'betweenness-centrality' && (
             <div className="param-group">
-              <label>Échantillon (nœuds sources): {sampleSize}</label>
+              <label>Sample size (source nodes): {sampleSize}</label>
               <input
                 type="range"
                 min={10}
@@ -256,12 +256,12 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           {/* Node search filter */}
           {(algoConfig?.needsSource || algoConfig?.needsTarget) && (
             <div className="param-group">
-              <label>Rechercher un nœud</label>
+              <label>Search for a node</label>
               <input
                 type="text"
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
-                placeholder="Filtrer les nœuds par id/label..."
+                placeholder="Filter nodes by id/label..."
               />
               <div className="node-chip-list">
                 {filteredNodes.slice(0, 20).map((n) => (
@@ -288,7 +288,7 @@ const AlgorithmPanel: React.FC<AlgorithmPanelProps> = ({ data, graphId, database
           onClick={runAlgorithm}
           disabled={loading || !graphId}
         >
-          {loading ? '⏳ Calcul en cours...' : '▶ Exécuter'}
+          {loading ? '⏳ Computing...' : '▶ Run'}
         </button>
 
         {error && <div className="algo-error">{error}</div>}
@@ -319,11 +319,11 @@ const AlgorithmResultView: React.FC<ResultViewProps> = ({ result, data }) => {
   return (
     <div className="algo-results">
       <div className="algo-results-header">
-        <h3>Résultat — {result.algorithm}</h3>
+        <h3>Result — {result.algorithm}</h3>
         <div className="algo-meta">
           <span className="meta-chip">⏱ {result.elapsed_ms} ms</span>
-          <span className="meta-chip">📊 {result.nodeCount} nœuds</span>
-          <span className="meta-chip">🔗 {result.edgeCount} arêtes</span>
+          <span className="meta-chip">📊 {result.nodeCount} nodes</span>
+          <span className="meta-chip">🔗 {result.edgeCount} edges</span>
         </div>
       </div>
 
@@ -354,7 +354,26 @@ const TraversalView: React.FC<{ data: TraversalResult; nodeMap: Map<string, stri
   algorithm,
 }) => {
   const [showAll, setShowAll] = useState(false);
+  const [expandedLevels, setExpandedLevels] = useState<Set<number>>(new Set());
+  const [expandedNodeChips, setExpandedNodeChips] = useState<Set<string>>(new Set());
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const displayed = showAll ? data.visitedNodes : data.visitedNodes.slice(0, 100);
+
+  // Auto-clear toast
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
+
+  const toggleLevel = useCallback((level: number) => {
+    setExpandedLevels(prev => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }, []);
 
   // Group by level
   const byLevel = useMemo(() => {
@@ -366,51 +385,128 @@ const TraversalView: React.FC<{ data: TraversalResult; nodeMap: Map<string, stri
     return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
   }, [data.visitedNodes]);
 
+  // Build children lookup: parentId → list of children nodes
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, Array<{ nodeId: string; level: number }>>();
+    for (const v of data.visitedNodes) {
+      if (v.parent) {
+        if (!map.has(v.parent)) map.set(v.parent, []);
+        map.get(v.parent)!.push({ nodeId: v.nodeId, level: v.level });
+      }
+    }
+    return map;
+  }, [data.visitedNodes]);
+
+  const handleNodeDoubleClick = useCallback((nodeId: string) => {
+    const children = childrenMap.get(nodeId);
+    if (!children || children.length === 0) {
+      setToastMessage('Pas de CI associé');
+      return;
+    }
+    setExpandedNodeChips(prev => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, [childrenMap]);
+
   return (
     <div className="result-section">
       <div className="result-stats">
         <div className="stat-card">
           <span className="stat-value">{data.visitedCount}</span>
-          <span className="stat-label">Nœuds visités</span>
+          <span className="stat-label">Visited nodes</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.maxDepth}</span>
-          <span className="stat-label">Profondeur max</span>
+          <span className="stat-label">Max depth</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{byLevel.length}</span>
-          <span className="stat-label">Niveaux</span>
+          <span className="stat-label">Levels</span>
         </div>
       </div>
 
       {algorithm === 'cascading-failure' && (
         <div className="cascade-summary">
           <p>
-            <strong>{data.visitedCount}</strong> nœuds tombés sur{' '}
-            <strong>{data.maxDepth}</strong> niveaux de propagation
+            <strong>{data.visitedCount}</strong> nodes failed across{' '}
+            <strong>{data.maxDepth}</strong> propagation levels
           </p>
         </div>
       )}
 
       {/* Level breakdown */}
       <div className="level-breakdown">
-        <h4>Répartition par niveau</h4>
+        <h4>Breakdown by level <span className="level-hint">(click a level to expand nodes, double-click a node to show its neighbors)</span></h4>
         <div className="level-bars">
           {byLevel.map(([level, nodes]) => (
-            <div key={level} className="level-bar-row">
-              <span className="level-label">Niv. {level}</span>
-              <div className="level-bar-container">
-                <div
-                  className="level-bar"
-                  style={{
-                    width: `${Math.min(100, (nodes.length / data.visitedCount) * 100)}%`,
-                  }}
-                />
+            <div key={level} className="level-group">
+              <div
+                className={`level-bar-row ${expandedLevels.has(level) ? 'expanded' : ''}`}
+                onClick={() => toggleLevel(level)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => e.key === 'Enter' && toggleLevel(level)}
+              >
+                <span className="level-expand-icon">{expandedLevels.has(level) ? '▾' : '▸'}</span>
+                <span className="level-label">Lvl. {level}</span>
+                <div className="level-bar-container">
+                  <div
+                    className="level-bar"
+                    style={{
+                      width: `${Math.min(100, (nodes.length / data.visitedCount) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <span className="level-count">{nodes.length}</span>
               </div>
-              <span className="level-count">{nodes.length}</span>
+              {expandedLevels.has(level) && (
+                <div className="level-nodes">
+                  {nodes.map(n => (
+                    <div key={n.nodeId} className="level-node-wrapper">
+                      <span
+                        className={`level-node-chip ${expandedNodeChips.has(n.nodeId) ? 'chip-expanded' : ''} ${childrenMap.has(n.nodeId) ? 'has-children' : ''}`}
+                        title={`${nodeMap.get(n.nodeId) || n.nodeId} — double-click to expand neighbors`}
+                        onDoubleClick={(e) => { e.stopPropagation(); handleNodeDoubleClick(n.nodeId); }}
+                      >
+                        <span className="node-chip-id">{n.nodeId}</span>
+                        <span className="node-chip-label">{nodeMap.get(n.nodeId) || ''}</span>
+                        {childrenMap.has(n.nodeId) && (
+                          <span className="node-chip-expand-icon">{expandedNodeChips.has(n.nodeId) ? '▾' : '▸'}</span>
+                        )}
+                      </span>
+                      {expandedNodeChips.has(n.nodeId) && childrenMap.get(n.nodeId) && (
+                        <div className="node-children">
+                          {childrenMap.get(n.nodeId)!.map(child => (
+                            <span
+                              key={child.nodeId}
+                              className={`level-node-chip child-chip ${childrenMap.has(child.nodeId) ? 'has-children' : ''}`}
+                              title={`${nodeMap.get(child.nodeId) || child.nodeId} (lvl ${child.level})`}
+                              onDoubleClick={(e) => { e.stopPropagation(); handleNodeDoubleClick(child.nodeId); }}
+                            >
+                              <span className="node-chip-id">{child.nodeId}</span>
+                              <span className="node-chip-label">{nodeMap.get(child.nodeId) || ''}</span>
+                              {childrenMap.has(child.nodeId) && (
+                                <span className="node-chip-expand-icon">▸</span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
+
+        {/* Toast */}
+        {toastMessage && (
+          <div className="algo-toast">{toastMessage}</div>
+        )}
       </div>
 
       {/* Table */}
@@ -418,9 +514,9 @@ const TraversalView: React.FC<{ data: TraversalResult; nodeMap: Map<string, stri
         <table className="result-table">
           <thead>
             <tr>
-              <th>Nœud</th>
+              <th>Node</th>
               <th>Label</th>
-              <th>Niveau</th>
+              <th>Level</th>
               <th>Parent</th>
             </tr>
           </thead>
@@ -437,7 +533,7 @@ const TraversalView: React.FC<{ data: TraversalResult; nodeMap: Map<string, stri
         </table>
         {data.visitedCount > 100 && !showAll && (
           <button className="show-more-btn" onClick={() => setShowAll(true)}>
-            Afficher les {data.visitedCount - 100} nœuds restants
+            Show {data.visitedCount - 100} remaining nodes
           </button>
         )}
       </div>
@@ -453,20 +549,20 @@ const ShortestPathView: React.FC<{ data: ShortestPathResult; nodeMap: Map<string
       <div className="result-stats">
         <div className="stat-card">
           <span className="stat-value">{data.cost >= 0 ? data.cost : '∞'}</span>
-          <span className="stat-label">Coût / Distance</span>
+          <span className="stat-label">Cost / Distance</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.path.length}</span>
-          <span className="stat-label">Nœuds sur le chemin</span>
+          <span className="stat-label">Nodes on path</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.exploredCount}</span>
-          <span className="stat-label">Nœuds explorés</span>
+          <span className="stat-label">Explored nodes</span>
         </div>
       </div>
 
       {data.path.length === 0 ? (
-        <div className="no-path">Aucun chemin trouvé entre les deux nœuds.</div>
+        <div className="no-path">No path found between the two nodes.</div>
       ) : (
         <div className="path-chain">
           {data.path.map((nodeId, i) => (
@@ -498,11 +594,11 @@ const CentralityView: React.FC<{ data: CentralityResultData; nodeMap: Map<string
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.stats.avg.toFixed(4)}</span>
-          <span className="stat-label">Moyenne</span>
+          <span className="stat-label">Average</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.stats.median.toFixed(4)}</span>
-          <span className="stat-label">Médiane</span>
+          <span className="stat-label">Median</span>
         </div>
         <div className="stat-card">
           <span className="stat-value">{data.stats.min.toFixed(4)}</span>
@@ -510,7 +606,7 @@ const CentralityView: React.FC<{ data: CentralityResultData; nodeMap: Map<string
         </div>
       </div>
 
-      <h4>Top {data.scores.length} nœuds</h4>
+      <h4>Top {data.scores.length} nodes</h4>
       <div className="centrality-bars">
         {data.scores.slice(0, 30).map((s, i) => (
           <div key={s.nodeId} className="centrality-row">
@@ -531,12 +627,12 @@ const CentralityView: React.FC<{ data: CentralityResultData; nodeMap: Map<string
 
       {data.scores.length > 30 && (
         <details className="more-scores">
-          <summary>Voir les {data.scores.length - 30} suivants</summary>
+          <summary>Show next {data.scores.length - 30}</summary>
           <table className="result-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Nœud</th>
+                <th>Node</th>
                 <th>Label</th>
                 <th>Score</th>
               </tr>
@@ -577,24 +673,24 @@ const CommunityView: React.FC<{ data: CommunityResultData; nodeMap: Map<string, 
       <div className="result-stats">
         <div className="stat-card">
           <span className="stat-value">{data.communityCount}</span>
-          <span className="stat-label">Communautés</span>
+          <span className="stat-label">Communities</span>
         </div>
         {data.modularity !== null && (
           <div className="stat-card">
             <span className="stat-value">{data.modularity.toFixed(4)}</span>
-            <span className="stat-label">Modularité</span>
+            <span className="stat-label">Modularity</span>
           </div>
         )}
         <div className="stat-card">
           <span className="stat-value">
             {sortedCommunities.length > 0 ? sortedCommunities[0][1].length : 0}
           </span>
-          <span className="stat-label">Plus grande</span>
+          <span className="stat-label">Largest</span>
         </div>
       </div>
 
       {/* Size distribution */}
-      <h4>Distribution des tailles</h4>
+      <h4>Size distribution</h4>
       <div className="community-grid">
         {sortedCommunities.map(([name, members], i) => (
           <details key={name} className="community-card">
@@ -603,7 +699,7 @@ const CommunityView: React.FC<{ data: CommunityResultData; nodeMap: Map<string, 
                 className="community-dot"
                 style={{ backgroundColor: COMMUNITY_COLORS[i % COMMUNITY_COLORS.length] }}
               />
-              {name} — <strong>{members.length}</strong> nœuds
+              {name} — <strong>{members.length}</strong> nodes
             </summary>
             <div className="community-members">
               {members.slice(0, 50).map((mId) => (
@@ -612,7 +708,7 @@ const CommunityView: React.FC<{ data: CommunityResultData; nodeMap: Map<string, 
                 </span>
               ))}
               {members.length > 50 && (
-                <span className="member-more">+{members.length - 50} de plus</span>
+                <span className="member-more">+{members.length - 50} more</span>
               )}
             </div>
           </details>
@@ -636,23 +732,23 @@ const TopologicalSortView: React.FC<{ data: TopologicalSortResult; nodeMap: Map<
       <div className="result-stats">
         <div className="stat-card">
           <span className="stat-value">{data.order.length}</span>
-          <span className="stat-label">Nœuds ordonnés</span>
+          <span className="stat-label">Ordered nodes</span>
         </div>
         <div className="stat-card">
           <span className={`stat-value ${data.hasCycle ? 'error' : 'success'}`}>
-            {data.hasCycle ? 'OUI' : 'NON'}
+            {data.hasCycle ? 'YES' : 'NO'}
           </span>
-          <span className="stat-label">Cycle détecté</span>
+          <span className="stat-label">Cycle detected</span>
         </div>
       </div>
 
       {data.hasCycle && (
         <div className="cycle-warning">
-          ⚠️ Le graphe contient des cycles — le tri topologique est partiel ({data.order.length} nœuds sur le total).
+          ⚠️ The graph contains cycles — topological sort is partial ({data.order.length} nodes out of total).
         </div>
       )}
 
-      <h4>Ordre de déploiement</h4>
+      <h4>Deployment order</h4>
       <div className="topo-order">
         {displayed.map((nodeId, i) => (
           <div key={nodeId} className="topo-item">
@@ -665,7 +761,7 @@ const TopologicalSortView: React.FC<{ data: TopologicalSortResult; nodeMap: Map<
 
       {data.order.length > 100 && !showAll && (
         <button className="show-more-btn" onClick={() => setShowAll(true)}>
-          Afficher les {data.order.length - 100} nœuds restants
+          Show {data.order.length - 100} remaining nodes
         </button>
       )}
     </div>

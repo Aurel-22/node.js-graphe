@@ -40,7 +40,7 @@ export function cmdbRoutes(
 
   router.post("/import", async (req, res) => {
     const limit = Math.min(Number(req.body?.limit) || 800, 5000);
-    const targetDatabase = (req.query.database as string) || "dev-11";
+    const targetDatabase = (req.query.database as string) || "DATA_VALEO";
     const t0 = Date.now();
 
     try {
@@ -142,6 +142,35 @@ export function cmdbRoutes(
           ON r.REFERENCE_ID = l.RELATION_TYPE_ID
       `);
 
+      // ── 3b. Charger les données de capacité (dépassement) ──
+      const capacityResult = await pool.request().query(`
+        SELECT ac.ASSET_ID, ac.CAPACITY_VALUE, ac.MAX_TARGET,
+          ch.CHARACTERISTIC_FR
+        FROM [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_ASSET_CHARACTERISTICS ac
+        JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_CHARACTERISTICS ch
+          ON ac.CHARACTERISTIC_ID = ch.CHARACTERISTIC_ID
+        WHERE ch.IS_CAPACITY = 1
+          AND ac.CAPACITY_VALUE IS NOT NULL
+          AND ac.MAX_TARGET IS NOT NULL
+          AND ac.CAPACITY_VALUE > ac.MAX_TARGET
+      `);
+      const exceededAssets = new Set<number>(
+        capacityResult.recordset.map((r: any) => r.ASSET_ID)
+      );
+
+      // ── 3c. Compter les requêtes actives (incidents + changements + services) par CI ──
+      const requestCountResult = await pool.request().query(`
+        SELECT CI_ID, COUNT(*) AS total
+        FROM [${EVO_DATA_DB}].[${EVO_SCHEMA}].SD_REQUEST
+        WHERE LEFT(RFC_NUMBER, 1) IN ('I', 'R', 'S')
+          AND END_DATE_UT IS NULL
+          AND CI_ID IS NOT NULL AND CI_ID > 0
+        GROUP BY CI_ID
+      `);
+      const requestCountMap = new Map<number, number>(
+        requestCountResult.recordset.map((r: any) => [r.CI_ID, r.total])
+      );
+
       await pool.close();
 
       // ── 4. Transformer en nœuds + arêtes pour le graph viewer ──
@@ -159,6 +188,8 @@ export function cmdbRoutes(
           disponibilite: ci.disponibilite,
           cout: ci.cout,
           estUnService: ci.estUnService,
+          capacityExceeded: exceededAssets.has(ci.asset_id),
+          requestCount: requestCountMap.get(ci.asset_id) || 0,
         },
       }));
 
@@ -452,7 +483,6 @@ export function cmdbRoutes(
       if (clusterEdgeRows) {
         // Cluster mode: edges already fetched
         linkRows = clusterEdgeRows;
-        await pool.close();
       } else {
         // ── 3. Charger les relations ENTRE les CIs sélectionnés (filtre côté SQL) ──
         // On combine CREATE TABLE + INSERTs + SELECT en un seul batch pour garder le scope de la temp table
@@ -485,8 +515,50 @@ export function cmdbRoutes(
         const rs = linkBatchResult.recordsets as any[];
         linkRows = rs[rs.length - 1];
         console.log(`[import-valeo] Got ${linkRows.length} edges from SQL`);
-        await pool.close();
       }
+
+      // ── 3b. Capacity exceeded detection (cross-DB via NETWORK_IDENTIFIER) ──
+      const exceededAssets = new Set<number>();
+      try {
+        // Collect names from DATA_VALEO CIs to match against EVO_DATA capacity data
+        const nameToAssetIds = new Map<string, number[]>();
+        for (const ci of ciRows) {
+          const name = (ci.nom || '').trim();
+          if (!name) continue;
+          if (!nameToAssetIds.has(name)) nameToAssetIds.set(name, []);
+          nameToAssetIds.get(name)!.push(ci.asset_id);
+        }
+        const uniqueNames = [...nameToAssetIds.keys()];
+        if (uniqueNames.length > 0) {
+          const NAME_BATCH = 500;
+          let capSql = `CREATE TABLE #cap_names (nom NVARCHAR(255) COLLATE SQL_Latin1_General_CP1_CI_AS PRIMARY KEY);\n`;
+          for (let i = 0; i < uniqueNames.length; i += NAME_BATCH) {
+            const batch = uniqueNames.slice(i, i + NAME_BATCH);
+            capSql += `INSERT INTO #cap_names (nom) VALUES ${batch.map(n => `(N'${n.replace(/'/g, "''")}')`).join(",")};\n`;
+          }
+          capSql += `
+            SELECT DISTINCT evo_a.NETWORK_IDENTIFIER AS nom
+            FROM #cap_names cn
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_ASSET evo_a ON evo_a.NETWORK_IDENTIFIER = cn.nom
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_ASSET_CHARACTERISTICS ac ON ac.ASSET_ID = evo_a.ASSET_ID
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_CHARACTERISTICS ch ON ac.CHARACTERISTIC_ID = ch.CHARACTERISTIC_ID
+            WHERE ch.IS_CAPACITY = 1
+              AND ac.CAPACITY_VALUE IS NOT NULL AND ac.MAX_TARGET IS NOT NULL
+              AND ac.CAPACITY_VALUE > ac.MAX_TARGET;
+            DROP TABLE #cap_names;
+          `;
+          const capResult = await pool.request().query(capSql);
+          const capRows = (capResult.recordsets as any[]).find(rs => rs.length > 0) || [];
+          for (const r of capRows) {
+            const ids = nameToAssetIds.get(r.nom);
+            if (ids) ids.forEach(id => exceededAssets.add(id));
+          }
+        }
+      } catch (capErr) {
+        console.warn("[import-valeo] Capacity check skipped:", (capErr as Error).message);
+      }
+
+      await pool.close();
 
       // ── 4. Transformer en nœuds + arêtes ──
       const nodes = ciRows.map((ci: any) => ({
@@ -507,6 +579,7 @@ export function cmdbRoutes(
           family_id: ci.family_id || null,
           family_label: ci.family_label || null,
           classification_level: ci.classification_level || null,
+          capacityExceeded: exceededAssets.has(ci.asset_id),
           ...(ci.edge_count != null ? { edge_count: ci.edge_count } : {}),
         },
       }));
@@ -749,6 +822,49 @@ export function cmdbRoutes(
         }
       }
 
+      // ── Capacity exceeded detection (cross-DB via NETWORK_IDENTIFIER) ──
+      const exceededViewAssets = new Set<number>();
+      try {
+        const nameToIds = new Map<string, number[]>();
+        for (const ci of ciRows) {
+          const name = (ci.nom || '').trim();
+          if (!name) continue;
+          if (!nameToIds.has(name)) nameToIds.set(name, []);
+          nameToIds.get(name)!.push(ci.asset_id);
+        }
+        const uniqueNames = [...nameToIds.keys()];
+        if (uniqueNames.length > 0) {
+          const NAME_BATCH = 500;
+          let capSql = `CREATE TABLE #cap_view_names (nom NVARCHAR(255) COLLATE SQL_Latin1_General_CP1_CI_AS PRIMARY KEY);\n`;
+          for (let i = 0; i < uniqueNames.length; i += NAME_BATCH) {
+            const batch = uniqueNames.slice(i, i + NAME_BATCH);
+            capSql += `INSERT INTO #cap_view_names (nom) VALUES ${batch.map(n => `(N'${n.replace(/'/g, "''")}')`).join(",")};\n`;
+          }
+          capSql += `
+            SELECT DISTINCT evo_a.NETWORK_IDENTIFIER AS nom
+            FROM #cap_view_names cn
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_ASSET evo_a ON evo_a.NETWORK_IDENTIFIER = cn.nom
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_ASSET_CHARACTERISTICS ac ON ac.ASSET_ID = evo_a.ASSET_ID
+            INNER JOIN [${EVO_DATA_DB}].[${EVO_SCHEMA}].AM_CHARACTERISTICS ch ON ac.CHARACTERISTIC_ID = ch.CHARACTERISTIC_ID
+            WHERE ch.IS_CAPACITY = 1
+              AND ac.CAPACITY_VALUE IS NOT NULL AND ac.MAX_TARGET IS NOT NULL
+              AND ac.CAPACITY_VALUE > ac.MAX_TARGET;
+            DROP TABLE #cap_view_names;
+          `;
+          const capResult = await pool.request().query(capSql);
+          const capRows = (capResult.recordsets as any[]).find(rs => rs.length > 0) || [];
+          for (const r of capRows) {
+            const ids = nameToIds.get(r.nom);
+            if (ids) ids.forEach(id => exceededViewAssets.add(id));
+          }
+        }
+        const capResult = await pool.request().query(capSql);
+        const capRows = (capResult.recordsets as any[]).find(rs => rs.length > 0) || [];
+        for (const r of capRows) exceededViewAssets.add(r.ASSET_ID as number);
+      } catch (capErr) {
+        console.warn("[view-valeo] Capacity check skipped:", (capErr as Error).message);
+      }
+
       await pool.close();
 
       // Transform to GraphData (no write)
@@ -766,6 +882,7 @@ export function cmdbRoutes(
           family_id: ci.family_id || null,
           family_label: ci.family_label || null,
           classification_level: ci.classification_level || null,
+          capacityExceeded: exceededViewAssets.has(ci.asset_id),
           ...(ci.edge_count != null ? { edge_count: ci.edge_count } : {}),
         },
       }));

@@ -17,9 +17,24 @@ interface GraphCache {
 class NodePositionCache {
   private cache: GraphCache = {};
   private storageKey = 'sigmajs-node-positions';
+  private versionKey = 'sigmajs-layout-version';
+  private currentVersion = 2; // bump to invalidate cached positions
 
   constructor() {
+    this.checkVersion();
     this.loadFromStorage();
+  }
+
+  private checkVersion(): void {
+    try {
+      const stored = localStorage.getItem(this.versionKey);
+      if (stored !== String(this.currentVersion)) {
+        localStorage.removeItem(this.storageKey);
+        localStorage.setItem(this.versionKey, String(this.currentVersion));
+      }
+    } catch {
+      // ignore
+    }
   }
 
   /**

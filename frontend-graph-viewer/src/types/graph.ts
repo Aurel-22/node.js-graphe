@@ -34,25 +34,3 @@ export interface GraphStats {
   node_types: Record<string, number>;
   average_degree: number;
 }
-
-// Pour react-force-graph
-export interface ForceGraphNode {
-  id: string;
-  name: string;
-  type: string;
-  color?: string;
-  val?: number;
-}
-
-export interface ForceGraphLink {
-  source: string;
-  target: string;
-  label?: string;
-  type: string;
-  color?: string;
-}
-
-export interface ForceGraphData {
-  nodes: ForceGraphNode[];
-  links: ForceGraphLink[];
-}

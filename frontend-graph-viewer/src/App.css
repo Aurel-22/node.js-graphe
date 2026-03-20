@@ -17,7 +17,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
+  background: var(--pearl-gradient, none), var(--bg-primary);
 }
 
 .app-header {
@@ -28,7 +28,7 @@ body {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   box-shadow: var(--header-shadow);
-  border-bottom: 1px solid var(--border-accent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   z-index: 100;
   gap: 20px;
 }
@@ -127,8 +127,9 @@ body {
 
 .viewer-toggle button.active {
   background: var(--accent);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  color: #0a0a0f;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(200, 200, 220, 0.15);
 }
 
 .header-info {
@@ -208,6 +209,8 @@ body {
 /* ═══ Graph viewer container — relative for export panel ═══ */
 .graph-viewer-container {
   position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ═══ WS status dot ═══ */

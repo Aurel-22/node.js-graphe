@@ -67,6 +67,14 @@ export interface RawQueryResult {
   totalMs?: number;
 }
 
+/** Résultat d'une requête multi-recordsets (nodes + edges). */
+export interface MultiQueryResult {
+  recordsets: Record<string, any>[][];
+  elapsed_ms: number;
+  engine: string;
+  error?: string;
+}
+
 /** Résultat du benchmark SQL vs Cache vs JSON. */
 export interface BenchmarkTimings {
   times: number[];
@@ -327,6 +335,29 @@ export const graphApi = {
         rows: [],
         elapsed_ms: 0,
         rowCount: 0,
+        engine: errData?.engine || engine || 'unknown',
+        error: errData?.error || err.message || 'Query failed',
+      };
+    }
+  },
+
+  // Execute a multi-recordset SQL query (returns all result sets)
+  executeGraphQuery: async (
+    query: string,
+    database?: string,
+    engine?: EngineType,
+  ): Promise<MultiQueryResult> => {
+    const params: Record<string, string> = {};
+    if (database) params.database = database;
+    if (engine) params.engine = engine;
+    try {
+      const response = await api.post<MultiQueryResult>('/query/graph', { query }, { params });
+      return response.data;
+    } catch (err: any) {
+      const errData = err?.response?.data;
+      return {
+        recordsets: [],
+        elapsed_ms: 0,
         engine: errData?.engine || engine || 'unknown',
         error: errData?.error || err.message || 'Query failed',
       };

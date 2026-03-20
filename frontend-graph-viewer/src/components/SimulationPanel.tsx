@@ -66,7 +66,7 @@ function buildCombos(includeCompression: boolean, includeForJson: boolean, inclu
     { label: 'Cache + JSON + Enrich',         nocache: false, format: 'json',    enrich: true  },
     { label: 'Cache + MsgPack',               nocache: false, format: 'msgpack', enrich: false },
     { label: 'Cache + MsgPack + Enrich',      nocache: false, format: 'msgpack', enrich: true  },
-    // Sans cache (SQL directe)
+    // Without cache (direct SQL)
     { label: 'SQL + JSON',                    nocache: true,  format: 'json',    enrich: false },
     { label: 'SQL + JSON + Enrich',           nocache: true,  format: 'json',    enrich: true  },
     { label: 'SQL + MsgPack',                 nocache: true,  format: 'msgpack', enrich: false },
@@ -82,7 +82,7 @@ function buildCombos(includeCompression: boolean, includeForJson: boolean, inclu
     for (const c of base) {
       combos.push({ ...c, nocompress: false, compress: 'gzip', label: c.label + ' + Gzip' });
       combos.push({ ...c, nocompress: false, compress: 'brotli', label: c.label + ' + Brotli' });
-      combos.push({ ...c, nocompress: true, label: c.label + ' (brut)' });
+      combos.push({ ...c, nocompress: true, label: c.label + ' (raw)' });
     }
   }
 
@@ -175,7 +175,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
           const prefix = [dbTag, gName].filter(Boolean).join(' ');
 
           // Warm up cache
-          setProgress(`${prefix ? prefix + ' — ' : ''}Préchauffage du cache…`);
+          setProgress(`${prefix ? prefix + ' — ' : ''}Warming up cache…`);
           await graphApi.getGraph(gid, db, { nocache: true, engine: engine as any });
 
           for (let c = 0; c < combos.length; c++) {
@@ -221,7 +221,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
 
           // Covering index test for this graph on this database
           if (testCovering && !hasIndexes) {
-            setProgress('Création des covering indexes…');
+            setProgress('Creating covering indexes…');
             await optimApi.createCoveringIndexes(db);
 
             const sqlCombos = combos.filter(c => c.nocache);
@@ -266,7 +266,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               });
             }
 
-            setProgress('Suppression des covering indexes…');
+            setProgress('Removing covering indexes…');
             await optimApi.dropCoveringIndexes(db);
           }
         }
@@ -283,7 +283,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         const cosmosRes: CosmosResult[] = [];
         for (const gid of graphsToTest) {
           const gName = graphsToTest.length > 1 ? graphLabel(gid) : undefined;
-          setProgress(`Cosmos — chargement ${gName || gid}…`);
+          setProgress(`Cosmos — loading ${gName || gid}…`);
           await yieldToBrowser();
 
           const graphResult = await graphApi.getGraph(gid, database, {
@@ -292,7 +292,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
           const gData = graphResult.data;
 
           // Measure Cosmos data preparation (node colors, link arrays, etc.)
-          setProgress(`Cosmos — préparation données (${gData.nodes.length} nœuds)…`);
+          setProgress(`Cosmos — preparing data (${gData.nodes.length} nodes)…`);
           await yieldToBrowser();
 
           const t0 = performance.now();
@@ -361,7 +361,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         const layoutBenchResults: LayoutResult[] = [];
 
         for (const bh of [false, true]) {
-          const label = bh ? 'ForceAtlas2 + Barnes-Hut' : 'ForceAtlas2 (brut O(n²))';
+          const label = bh ? 'ForceAtlas2 + Barnes-Hut' : 'ForceAtlas2 (raw O(n²))';
           setProgress(`Layout — ${label} (0/${iterations})`);
           await yieldToBrowser();
           const times: number[] = [];
@@ -404,7 +404,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
 
       setProgress('');
     } catch (e: any) {
-      setError(e?.message ?? 'Erreur simulation');
+      setError(e?.message ?? 'Simulation error');
     } finally {
       setRunning(false);
     }
@@ -421,9 +421,9 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
   return (
     <div className="simulation-panel">
       <div className="simulation-header">
-        <h2>🧪 Simulation de performance</h2>
+        <h2>🧪 Performance simulation</h2>
         <p className="simulation-subtitle">
-          Compare toutes les combinaisons d'optimisations pour trouver la plus rapide
+          Compares all optimization combinations to find the fastest
         </p>
       </div>
 
@@ -437,8 +437,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setMultiGraph(e.target.checked)}
               disabled={running}
             />
-            Multi-graphe
-            <small>(comparer plusieurs graphes)</small>
+            Multi-graph
+            <small>(compare multiple graphs)</small>
           </label>
         </div>
         {multiGraph && graphs.length > 0 && (
@@ -465,8 +465,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         )}
         {!multiGraph && (
           <div className="simulation-config-row">
-            <label>Graphe :</label>
-            <span className="simulation-value">{graphId ? <code>{graphId}</code> : <em>Aucun sélectionné</em>}</span>
+            <label>Graph:</label>
+            <span className="simulation-value">{graphId ? <code>{graphId}</code> : <em>None selected</em>}</span>
           </div>
         )}
 
@@ -479,8 +479,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestMultiDatabase(e.target.checked)}
               disabled={running}
             />
-            Multi-base
-            <small>(comparer plusieurs bases de données — double le temps)</small>
+            Multi-database
+            <small>(compare multiple databases — doubles the time)</small>
           </label>
         </div>
         {testMultiDatabase && databases.length > 0 && (
@@ -500,19 +500,19 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
                   disabled={running}
                 />
                 <span className="graph-option-title">{db.name}</span>
-                <span className="graph-option-meta">{db.default ? '(défaut)' : ''} {db.status}</span>
+                <span className="graph-option-meta">{db.default ? '(default)' : ''} {db.status}</span>
               </label>
             ))}
           </div>
         )}
         {!testMultiDatabase && (
           <div className="simulation-config-row">
-            <label>Base :</label>
+            <label>Database:</label>
             <span className="simulation-value"><code>{database ?? 'default'}</code></span>
           </div>
         )}
         <div className="simulation-config-row">
-          <label>Itérations par combo :</label>
+          <label>Iterations per combo:</label>
           <input
             type="number"
             min={1}
@@ -531,8 +531,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestCompression(e.target.checked)}
               disabled={running}
             />
-            Tester compression (Gzip vs Brotli vs brut)
-            <small>(triple le nombre de combos)</small>
+            Test compression (Gzip vs Brotli vs raw)
+            <small>(triples the number of combos)</small>
           </label>
           <label className="simulation-checkbox">
             <input
@@ -541,8 +541,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestCovering(e.target.checked)}
               disabled={running}
             />
-            Tester Covering Indexes
-            <small>(crée puis supprime les indexes)</small>
+            Test Covering Indexes
+            <small>(creates then removes indexes)</small>
           </label>
           <label className="simulation-checkbox">
             <input
@@ -551,7 +551,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestBarnesHut(e.target.checked)}
               disabled={running}
             />
-            Tester Barnes-Hut (layout ForceAtlas2)
+            Test Barnes-Hut (ForceAtlas2 layout)
             <small>(O(n²) vs O(n log n))</small>
           </label>
           <label className="simulation-checkbox">
@@ -561,8 +561,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestCosmos(e.target.checked)}
               disabled={running}
             />
-            Tester rendu Cosmos (GPU)
-            <small>(temps de préparation données)</small>
+            Test Cosmos rendering (GPU)
+            <small>(data preparation time)</small>
           </label>
           <label className="simulation-checkbox">
             <input
@@ -571,8 +571,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestForJson(e.target.checked)}
               disabled={running}
             />
-            Tester FOR JSON PATH SQL
-            <small>(JSON construit côté SQL Server)</small>
+            Test FOR JSON PATH SQL
+            <small>(JSON built on SQL Server side)</small>
           </label>
           <label className="simulation-checkbox">
             <input
@@ -581,13 +581,13 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               onChange={(e) => setTestStream(e.target.checked)}
               disabled={running}
             />
-            Tester Streaming HTTP
+            Test Streaming HTTP
             <small>(Transfer-Encoding: chunked)</small>
           </label>
         </div>
         {testBarnesHut && (
           <div className="simulation-config-row">
-            <label>Itérations ForceAtlas2 :</label>
+            <label>ForceAtlas2 iterations:</label>
             <input
               type="number"
               min={5}
@@ -601,15 +601,15 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
         )}
 
         <div className="simulation-combos-info">
-          <strong>{comboCount} combinaisons</strong> × {iterations} itérations
-          × {graphsToTest.length} graphe{graphsToTest.length > 1 ? 's' : ''}
-          × {databasesToTest.length} base{databasesToTest.length > 1 ? 's' : ''}
-          = <strong>{totalCalls} appels API</strong>
+          <strong>{comboCount} combinations</strong> × {iterations} iterations
+          × {graphsToTest.length} graph{graphsToTest.length > 1 ? 's' : ''}
+          × {databasesToTest.length} database{databasesToTest.length > 1 ? 's' : ''}
+          = <strong>{totalCalls} API calls</strong>
           {testBarnesHut && (
             <span> + <strong>2 layouts</strong> × {iterations} passes</span>
           )}
           {testCosmos && (
-            <span> + <strong>{graphsToTest.length} test{graphsToTest.length > 1 ? 's' : ''} Cosmos</strong></span>
+            <span> + <strong>{graphsToTest.length} Cosmos test{graphsToTest.length > 1 ? 's' : ''}</strong></span>
           )}
         </div>
 
@@ -618,7 +618,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
           onClick={runSimulation}
           disabled={running || graphsToTest.length === 0}
         >
-          {running ? `⏳ ${progress}` : '🚀 Lancer la simulation'}
+          {running ? `⏳ ${progress}` : '🚀 Run simulation'}
         </button>
 
         {error && <div className="simulation-error">{error}</div>}
@@ -626,10 +626,10 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
 
       {results.length > 0 && (
         <div className="simulation-results">
-          <h3>📊 Résultats (triés par temps {sortBy === 'avg' ? 'moyen' : sortBy === 'min' ? 'minimum' : 'maximum'})</h3>
+          <h3>📊 Results (sorted by {sortBy === 'avg' ? 'average' : sortBy === 'min' ? 'minimum' : 'maximum'} time)</h3>
 
           <div className="simulation-sort-btns">
-            <button className={sortBy === 'avg' ? 'active' : ''} onClick={() => setSortBy('avg')}>Moy.</button>
+            <button className={sortBy === 'avg' ? 'active' : ''} onClick={() => setSortBy('avg')}>Avg.</button>
             <button className={sortBy === 'min' ? 'active' : ''} onClick={() => setSortBy('min')}>Min</button>
             <button className={sortBy === 'max' ? 'active' : ''} onClick={() => setSortBy('max')}>Max</button>
           </div>
@@ -663,13 +663,13 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             <thead>
               <tr>
                 <th>#</th>
-                <th>Combinaison</th>
-                <th>Moy.</th>
+                <th>Combination</th>
+                <th>Avg.</th>
                 <th>Min</th>
                 <th>Max</th>
-                <th>Taille brute</th>
-                {testCompression && <th>Taille Gzip</th>}
-                <th>Gain vs pire</th>
+                <th>Raw size</th>
+                {testCompression && <th>Gzip size</th>}
+                <th>Gain vs worst</th>
               </tr>
             </thead>
             <tbody>
@@ -685,8 +685,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
                     <td><strong>{r.avg} ms</strong></td>
                     <td>{r.min} ms</td>
                     <td>{r.max} ms</td>
-                    <td>{r.sizeKb != null ? `${r.sizeKb} Ko` : '—'}</td>
-                    {testCompression && <td>{r.compressedKb != null ? `${r.compressedKb} Ko` : '—'}</td>}
+                    <td>{r.sizeKb != null ? `${r.sizeKb} KB` : '—'}</td>
+                    {testCompression && <td>{r.compressedKb != null ? `${r.compressedKb} KB` : '—'}</td>}
                     <td className={gainVsSlowest > 0 ? 'gain-positive' : ''}>
                       {gainVsSlowest > 0 ? `−${gainVsSlowest}%` : '—'}
                     </td>
@@ -704,30 +704,30 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
                 <div>
                   <strong>{fastest.label}</strong>
                   <span className="summary-detail">
-                    {fastest.avg} ms en moyenne — {Math.round((1 - fastest.avg / slowest.avg) * 100)}% plus rapide que le pire cas
+                    {fastest.avg} ms on average \u2014 {Math.round((1 - fastest.avg / slowest.avg) * 100)}% faster than worst case
                   </span>
                 </div>
               </div>
               <div className="summary-details">
                 <div className="summary-card">
-                  <span className="summary-card-title">⚡ Le plus rapide</span>
+                  <span className="summary-card-title">\u26a1 Fastest</span>
                   <strong>{fastest.label}</strong>
-                  <span>{fastest.avg} ms (moy.) / {fastest.min} ms (min)</span>
+                  <span>{fastest.avg} ms (avg) / {fastest.min} ms (min)</span>
                 </div>
                 <div className="summary-card slowest">
-                  <span className="summary-card-title">🐢 Le plus lent</span>
+                  <span className="summary-card-title">\ud83d\udc22 Slowest</span>
                   <strong>{slowest.label}</strong>
-                  <span>{slowest.avg} ms (moy.) / {slowest.max} ms (max)</span>
+                  <span>{slowest.avg} ms (avg) / {slowest.max} ms (max)</span>
                 </div>
                 <div className="summary-card">
-                  <span className="summary-card-title">📦 Taille min</span>
+                  <span className="summary-card-title">\ud83d\udce6 Min size</span>
                   {(() => {
                     const withSize = results.filter(r => r.sizeKb != null);
                     const smallest = withSize.length > 0 ? withSize.reduce((a, b) => (a.sizeKb ?? Infinity) < (b.sizeKb ?? Infinity) ? a : b) : null;
                     return smallest ? (
                       <>
                         <strong>{smallest.label}</strong>
-                        <span>{smallest.sizeKb} Ko</span>
+                        <span>{smallest.sizeKb} KB</span>
                       </>
                     ) : <span>—</span>;
                   })()}
@@ -735,7 +735,7 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
               </div>
               {coveringIndexes !== null && (
                 <div className="summary-note">
-                  Covering Indexes : {coveringIndexes ? '✅ actifs pendant le test' : '❌ inactifs pendant le test'}
+                  Covering Indexes : {coveringIndexes ? '✅ active during test' : '❌ inactive during test'}
                 </div>
               )}
             </div>
@@ -746,14 +746,14 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
       {/* Cosmos rendering benchmark */}
       {cosmosResults.length > 0 && (
         <div className="simulation-results simulation-cosmos-results">
-          <h3>🚀 Cosmos GPU — Préparation des données pour le rendu WebGL</h3>
+          <h3>🚀 Cosmos GPU — Data preparation for WebGL rendering</h3>
           <table className="simulation-table">
             <thead>
               <tr>
-                <th>Graphe</th>
-                <th>Nœuds</th>
-                <th>Arêtes</th>
-                <th>Temps de préparation</th>
+                <th>Graph</th>
+                <th>Nodes</th>
+                <th>Edges</th>
+                <th>Preparation time</th>
               </tr>
             </thead>
             <tbody>
@@ -768,8 +768,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
             </tbody>
           </table>
           <div className="cosmos-note">
-            Le rendu GPU (WebGL) par Cosmos est quasi-instantané après la préparation des données.
-            Le temps affiché est uniquement le coût CPU de transformation (couleurs, index, tailles).
+            GPU rendering (WebGL) by Cosmos is near-instant after data preparation.
+            The time shown is only the CPU cost of transformation (colors, indexes, sizes).
           </div>
         </div>
       )}
@@ -777,9 +777,9 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
       {/* Barnes-Hut layout benchmark results */}
       {layoutResults.length > 0 && (
         <div className="simulation-results simulation-layout-results">
-          <h3>🌳 Barnes-Hut — Benchmark layout ForceAtlas2</h3>
+          <h3>🌳 Barnes-Hut — ForceAtlas2 layout benchmark</h3>
           <p className="layout-info">
-            {layoutResults[0].nodeCount} nœuds, {layoutResults[0].edgeCount} arêtes — {layoutResults[0].layoutIterations} itérations ForceAtlas2
+            {layoutResults[0].nodeCount} nodes, {layoutResults[0].edgeCount} edges — {layoutResults[0].layoutIterations} ForceAtlas2 iterations
           </p>
 
           {/* Layout bar chart */}
@@ -809,8 +809,8 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
           <table className="simulation-table">
             <thead>
               <tr>
-                <th>Algorithme</th>
-                <th>Moy.</th>
+                <th>Algorithm</th>
+                <th>Avg.</th>
                 <th>Min</th>
                 <th>Max</th>
                 <th>Gain</th>
@@ -849,13 +849,13 @@ const SimulationPanel: React.FC<SimulationPanelProps> = ({ graphId, database, en
                   <div>
                     <strong>{fastest.label}</strong>
                     <span className="summary-detail">
-                      {fastest.avg} ms en moyenne — {speedup}× plus rapide
+                      {fastest.avg} ms on average — {speedup}× faster
                     </span>
                     <span className="summary-detail">
-                      Barnes-Hut réduit la complexité du calcul de forces de O(n²) à O(n log n).
+                      Barnes-Hut reduces force computation complexity from O(n²) to O(n log n).
                       {fastest.nodeCount > 1000
-                        ? ` Avec ${fastest.nodeCount.toLocaleString()} nœuds, le gain est significatif.`
-                        : ` Avec seulement ${fastest.nodeCount} nœuds, le gain peut être faible.`}
+                        ? ` With ${fastest.nodeCount.toLocaleString()} nodes, the gain is significant.`
+                        : ` With only ${fastest.nodeCount} nodes, the gain may be small.`}
                     </span>
                   </div>
                 </div>

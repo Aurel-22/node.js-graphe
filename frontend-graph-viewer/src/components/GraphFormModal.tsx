@@ -48,11 +48,11 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) {
-      setError('Le titre est requis');
+      setError('Title is required');
       return;
     }
     if (!mermaidCode.trim()) {
-      setError('Le code Mermaid est requis');
+      setError('Mermaid code is required');
       return;
     }
 
@@ -77,7 +77,7 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
       onCreated();
       onClose();
     } catch (err: any) {
-      setError(err?.response?.data?.error || err.message || 'Erreur lors de la création');
+      setError(err?.response?.data?.error || err.message || 'Error during creation');
     } finally {
       setSubmitting(false);
     }
@@ -95,7 +95,7 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>Nouveau graphe</h2>
+          <h2>New Graph</h2>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -104,13 +104,13 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
 
           <div className="form-row">
             <div className="form-group">
-              <label htmlFor="graph-title">Titre *</label>
+              <label htmlFor="graph-title">Title *</label>
               <input
                 id="graph-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Mon graphe"
+                placeholder="My graph"
                 required
                 autoFocus
               />
@@ -136,7 +136,7 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Description du graphe"
+                placeholder="Graph description"
             />
           </div>
 
@@ -144,7 +144,7 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
             <div className="label-row">
               <label htmlFor="graph-mermaid">Code Mermaid *</label>
               <button type="button" className="template-btn" onClick={loadTemplate}>
-                Charger template
+                Load template
               </button>
             </div>
             <textarea
@@ -159,10 +159,10 @@ const GraphFormModal: React.FC<GraphFormModalProps> = ({
 
           <div className="form-actions">
             <button type="button" className="btn-cancel" onClick={onClose} disabled={submitting}>
-              Annuler
+              Cancel
             </button>
             <button type="submit" className="btn-create" disabled={submitting}>
-              {submitting ? 'Création...' : 'Créer le graphe'}
+              {submitting ? 'Creating...' : 'Create graph'}
             </button>
           </div>
         </form>

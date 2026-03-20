@@ -53,7 +53,7 @@ export const GraphList: React.FC<GraphListProps> = ({
         <div className="graph-list-header">
           <h2>Available Graphs</h2>
           {onCreateGraph && (
-            <button className="btn-add-graph" onClick={onCreateGraph} title="Nouveau graphe">+</button>
+            <button className="btn-add-graph" onClick={onCreateGraph} title="New graph">+</button>
           )}
         </div>
         <div className="no-graphs">No graphs found</div>
@@ -69,13 +69,13 @@ export const GraphList: React.FC<GraphListProps> = ({
           <button
             className="btn-deduplicate-graphs"
             onClick={onDeduplicateGraphs}
-            title="Supprimer les graphes en double (même titre)"
+            title="Remove duplicate graphs (same title)"
           >
             ⧉
           </button>
         )}
         {onCreateGraph && (
-          <button className="btn-add-graph" onClick={onCreateGraph} title="Nouveau graphe">+</button>
+          <button className="btn-add-graph" onClick={onCreateGraph} title="New graph">+</button>
         )}
       </div>
       <div className="graph-items">
@@ -102,7 +102,7 @@ export const GraphList: React.FC<GraphListProps> = ({
               <button
                 className="btn-delete-graph"
                 onClick={(e) => handleDelete(e, graph)}
-                title={deletingId === graph.id ? 'Cliquer encore pour confirmer' : 'Supprimer'}
+                title={deletingId === graph.id ? 'Click again to confirm' : 'Delete'}
                 style={deletingId === graph.id ? { opacity: 1, background: 'rgba(244,67,54,0.2)', color: '#f44336' } : undefined}
               >
                 {deletingId === graph.id ? '✓' : '✕'}

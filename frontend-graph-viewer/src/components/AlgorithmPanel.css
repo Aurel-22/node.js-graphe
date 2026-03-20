@@ -276,11 +276,33 @@
   overflow-y: auto;
 }
 
+.level-group {
+  margin-bottom: 2px;
+}
+
 .level-bar-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.level-bar-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.level-bar-row.expanded {
+  background: rgba(79, 195, 247, 0.08);
+}
+
+.level-expand-icon {
+  width: 14px;
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  flex-shrink: 0;
 }
 
 .level-label {
@@ -288,6 +310,131 @@
   font-size: 12px;
   color: var(--text-secondary, #888);
   text-align: right;
+}
+
+.level-hint {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-secondary, #666);
+  font-style: italic;
+}
+
+.level-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 8px 28px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.level-node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  color: var(--text-primary, #ccc);
+  cursor: default;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  max-width: 180px;
+  overflow: hidden;
+}
+
+.level-node-chip:hover {
+  background: rgba(79, 195, 247, 0.18);
+  box-shadow: 0 0 0 1px rgba(79, 195, 247, 0.35);
+}
+
+.node-chip-id {
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.node-chip-label {
+  display: none;
+  font-size: 10px;
+  color: #4fc3f7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.level-node-chip:hover .node-chip-label {
+  display: inline;
+}
+
+/* Expandable node chips */
+.level-node-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.level-node-chip.has-children {
+  cursor: pointer;
+}
+
+.level-node-chip.chip-expanded {
+  background: rgba(79, 195, 247, 0.2);
+  box-shadow: 0 0 0 1px rgba(79, 195, 247, 0.4);
+}
+
+.node-chip-expand-icon {
+  font-size: 8px;
+  opacity: 0.5;
+  margin-left: 2px;
+}
+
+.node-children {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 4px 4px 12px;
+  margin-top: 1px;
+  border-left: 2px solid rgba(79, 195, 247, 0.3);
+  margin-left: 6px;
+}
+
+.child-chip {
+  background: rgba(129, 212, 250, 0.1) !important;
+  border: 1px dashed rgba(79, 195, 247, 0.25);
+}
+
+.child-chip:hover {
+  background: rgba(129, 212, 250, 0.2) !important;
+}
+
+/* Toast */
+.algo-toast {
+  position: sticky;
+  bottom: 0;
+  align-self: center;
+  background: rgba(30, 35, 45, 0.95);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  margin-top: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  animation: algo-toast-fade 3s ease-in-out forwards;
+  pointer-events: none;
+}
+
+@keyframes algo-toast-fade {
+  0% { opacity: 0; transform: scale(0.95); }
+  10% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .level-bar-container {
